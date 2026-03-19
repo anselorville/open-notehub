@@ -26,7 +26,10 @@ async function getCompressedContent(docId: string, content: string, title: strin
     where: eq(schema.documents.id, docId),
     columns: { summary: true },
   })
-  if (doc?.summary) return doc.summary
+  if (doc?.summary) {
+    const s = doc.summary
+    return s.length <= MAX_CONTENT_CHARS ? s : s.slice(0, MAX_CONTENT_CHARS) + '\n...(摘要已截断)'
+  }
 
   // 2. Quick internal summarize (not saved as a version)
   if (content.length > MAX_CONTENT_CHARS) {
@@ -38,7 +41,10 @@ async function getCompressedContent(docId: string, content: string, title: strin
         ],
         maxTokens: 800,
       })
-      if (result.content) return result.content
+      if (result.content) {
+        const s = result.content
+        return s.length <= MAX_CONTENT_CHARS ? s : s.slice(0, MAX_CONTENT_CHARS) + '\n...(摘要已截断)'
+      }
     } catch {
       // Fall through to truncation
     }
@@ -61,6 +67,7 @@ export async function runBrainstorm(opts: BrainstormOptions): Promise<void> {
 
   const compressed = await getCompressedContent(docId, content, title)
   const searchQueries: string[] = []
+  let flushQueue: Promise<void> = Promise.resolve()
 
   await runSubagent({
     systemPrompt: BRAINSTORM_SYSTEM,
@@ -80,10 +87,14 @@ export async function runBrainstorm(opts: BrainstormOptions): Promise<void> {
     },
     onDelta: (chunk) => {
       emitChunk(ctx, chunk)
-      flushResult(resultId, ctx.accumulated).catch(e => console.error('[brainstorm/flush]', e))
+      flushQueue = flushQueue
+        .then(() => flushResult(resultId, ctx.accumulated))
+        .catch(e => console.error('[brainstorm/flush]', e))
     },
     signal: ctx.abortController.signal,
   })
+
+  await flushQueue
 
   const meta = JSON.stringify({ search_queries: searchQueries })
   await db.run(sql`

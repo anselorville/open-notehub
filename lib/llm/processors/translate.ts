@@ -49,6 +49,7 @@ export async function runTranslate(opts: TranslateOptions): Promise<void> {
   const done: boolean[] = new Array(chunks.length).fill(false)
   const failedChunks: number[] = []
   let emittedUpTo = 0  // index of next chunk to emit
+  const flushPromises: Promise<void>[] = []  // track all DB writes
 
   const tasks = chunks.map((chunk, i) => async () => {
     try {
@@ -63,12 +64,14 @@ export async function runTranslate(opts: TranslateOptions): Promise<void> {
     while (emittedUpTo < chunks.length && done[emittedUpTo]) {
       const toEmit = results[emittedUpTo] + (emittedUpTo < chunks.length - 1 ? '\n\n' : '')
       emitChunk(ctx, toEmit)
-      await flushResult(resultId, ctx.accumulated)
+      flushPromises.push(flushResult(resultId, ctx.accumulated))
       emittedUpTo++
     }
   })
 
   await pLimit(tasks, CONCURRENCY)
+  // Wait for all flushes to complete before marking done
+  await Promise.all(flushPromises)
 
   // Update meta
   const meta = JSON.stringify({

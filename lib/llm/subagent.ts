@@ -55,6 +55,8 @@ export async function runSubagent(opts: SubagentOptions): Promise<void> {
           const para = paragraphs[i]
           onDelta(para + (i < paragraphs.length - 1 ? '\n\n' : ''))
         }
+      } else {
+        console.warn('[subagent] LLM returned empty content with no tool calls on round', round)
       }
       return
     }

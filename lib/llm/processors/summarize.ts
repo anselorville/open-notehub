@@ -71,6 +71,7 @@ export async function runSummarize(opts: SummarizeOptions): Promise<void> {
   }
 
   // Reduce phase: stream the final structured summary
+  let flushQueue: Promise<void> = Promise.resolve()
   try {
     await streamChat({
       messages: [
@@ -79,13 +80,17 @@ export async function runSummarize(opts: SummarizeOptions): Promise<void> {
       ],
       maxTokens: 2000,
       onDelta: (chunk) => {
-        // Synchronous callback — fire-and-forget the DB flush to avoid type mismatch
         emitChunk(ctx, chunk)
-        flushResult(resultId, ctx.accumulated).catch(e => console.error('[summarize/flush]', e))
+        // Chain flushes sequentially to prevent out-of-order DB writes
+        flushQueue = flushQueue
+          .then(() => flushResult(resultId, ctx.accumulated))
+          .catch(e => console.error('[summarize/flush]', e))
       },
       signal: ctx.abortController.signal,
     })
+    await flushQueue  // wait for all pending flushes
   } catch (err) {
+    await flushQueue.catch(() => {})  // wait for pending flushes even on error
     // Graceful degradation: ALWAYS emit fallback on reduce failure
     // (regardless of how much was already accumulated)
     const fallback = `\n\n---\n\n> ⚠️ 综合摘要生成失败，以下为自动降级摘要：\n\n${reduceInput}`

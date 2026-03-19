@@ -53,8 +53,12 @@ export function emitChunk(ctx: TaskContext, chunk: string): void {
  * Signal task completion to all subscribers, then remove from registry.
  */
 export function emitDone(ctx: TaskContext): void {
-  for (const subscriber of ctx.subscribers) {
-    subscriber.onDone()
+  for (const subscriber of Array.from(ctx.subscribers)) {
+    try {
+      subscriber.onDone()
+    } catch (err) {
+      console.error('[task-registry/emitDone]', err)
+    }
   }
   registry.delete(ctx.taskId)
 }
@@ -63,8 +67,12 @@ export function emitDone(ctx: TaskContext): void {
  * Signal task error to all subscribers, then remove from registry.
  */
 export function emitError(ctx: TaskContext, message: string): void {
-  for (const subscriber of ctx.subscribers) {
-    subscriber.onError(message)
+  for (const subscriber of Array.from(ctx.subscribers)) {
+    try {
+      subscriber.onError(message)
+    } catch (err) {
+      console.error('[task-registry/emitError]', err)
+    }
   }
   registry.delete(ctx.taskId)
 }
