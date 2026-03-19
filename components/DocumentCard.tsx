@@ -2,6 +2,23 @@ import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
 import { formatDate } from '@/lib/utils'
 
+/** Strip common markdown syntax to produce plain readable text for previews. */
+function toPlainText(md: string): string {
+  return md
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, '')          // remove images
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')        // links → label text
+    .replace(/^#{1,6}\s+/gm, '')                    // headings
+    .replace(/^[-=*_]{3,}\s*$/gm, '')               // horizontal rules / setext underlines
+    .replace(/\*{1,3}([^*\n]+)\*{1,3}/g, '$1')     // bold/italic
+    .replace(/_{1,3}([^_\n]+)_{1,3}/g, '$1')        // underscore bold/italic
+    .replace(/`{1,3}[^`\n]*`{1,3}/g, '')            // inline & fenced code
+    .replace(/^>\s*/gm, '')                          // blockquotes
+    .replace(/^[-*+]\s+/gm, '')                      // unordered lists
+    .replace(/^\d+\.\s+/gm, '')                      // ordered lists
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 interface Props {
   id: string
   title: string
@@ -36,11 +53,14 @@ export function DocumentCard({
           </span>
         </div>
 
-        {summary && (
-          <p className="mt-2 text-sm text-muted-foreground line-clamp-2 leading-relaxed">
-            {summary}
-          </p>
-        )}
+        {summary && (() => {
+          const plain = toPlainText(summary)
+          return plain ? (
+            <p className="mt-2 text-sm text-muted-foreground line-clamp-2 leading-relaxed">
+              {plain}
+            </p>
+          ) : null
+        })()}
 
         <div className="mt-3 flex flex-wrap gap-1.5">
           {tags.slice(0, 5).map(tag => (
