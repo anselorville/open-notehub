@@ -47,3 +47,23 @@ export const documents = sqliteTable('documents', {
 
 export type Document = typeof documents.$inferSelect
 export type NewDocument = typeof documents.$inferInsert
+
+export const smartResults = sqliteTable('smart_results', {
+  id:          text('id').primaryKey(),
+  documentId:  text('document_id').notNull().references(() => documents.id),
+  mode:        text('mode').notNull(),       // 'translate' | 'summarize' | 'brainstorm'
+  version:     integer('version').notNull(),
+  status:      text('status').notNull().default('running'), // 'running'|'done'|'error'|'interrupted'
+  result:      text('result'),
+  meta:        text('meta'),                 // JSON string
+  error:       text('error'),
+  createdAt:   integer('created_at', { mode: 'timestamp' }).notNull()
+                 .default(sql`(unixepoch())`),
+  completedAt: integer('completed_at', { mode: 'timestamp' }),
+}, (t) => ({
+  docModeIdx:  index('smart_results_doc_mode_version_idx').on(t.documentId, t.mode, t.version),
+  statusIdx:   index('smart_results_status_idx').on(t.status),
+}))
+
+export type SmartResult = typeof smartResults.$inferSelect
+export type NewSmartResult = typeof smartResults.$inferInsert
