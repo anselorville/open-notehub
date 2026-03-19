@@ -44,9 +44,13 @@ function formatVersionTime(iso: string): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${time}`
 }
 
+// 结构化分块进度
+type Chunk = { idx: number; type: string; meta: Record<string, unknown>; content: string; translated: string; status: string; error: string }
+
 export default function SmartPage() {
   const { id } = useParams<{ id: string }>()
 
+  const [chunks, setChunks]           = useState<Chunk[]>([])
   const [mode, setMode]               = useState<Mode>('translate')
   const [status, setStatus]           = useState<Status>('empty')
   const [content, setContent]         = useState('')
@@ -76,7 +80,9 @@ export default function SmartPage() {
       .catch(() => {})
   }, [id])
 
-  function streamVersion(resultId: string) {
+  // refreshOnDone=true: calls loadVersions after done (for newly launched tasks)
+  // refreshOnDone=false: just updates version chip in-place (for pre-existing tasks)
+  function streamVersion(resultId: string, refreshOnDone = false) {
     eventSourceRef.current?.close()
     setContent('')
     setError('')
@@ -93,17 +99,31 @@ export default function SmartPage() {
     es.addEventListener('done', () => {
       setStatusWithRef('done')
       es.close()
-      // Refresh versions to update timestamps
-      loadVersions()
+      if (refreshOnDone) {
+        // Refresh version list to get real completed_at timestamp
+        loadVersions()
+      } else {
+        // Update version chip in-place to avoid triggering loadVersions loop
+        setVersions(prev => prev.map(v =>
+          v.id === resultId
+            ? { ...v, status: 'done', completed_at: new Date().toISOString() }
+            : v
+        ))
+      }
     })
 
     es.addEventListener('error', (e: Event) => {
+      // Ignore connection-close errors when we already finished successfully
+      if (statusRef.current === 'done') {
+        es.close()
+        return
+      }
       const msgEvent = e as MessageEvent
       try {
         const parsed = JSON.parse(msgEvent.data) as { message?: string }
         setError(parsed.message ?? '生成失败')
       } catch {
-        if (statusRef.current !== 'done') setError('连接中断')
+        setError('连接中断')
       }
       setStatusWithRef('error')
       es.close()
@@ -122,7 +142,8 @@ export default function SmartPage() {
       if (latest) {
         setSelectedVer(latest.id)
         if (latest.status === 'done' || latest.status === 'running') {
-          streamVersion(latest.id)
+          // refreshOnDone=false: don't trigger loadVersions again (prevents infinite loop)
+          streamVersion(latest.id, false)
         } else if (latest.status === 'interrupted') {
           setStatusWithRef('error')
           setError('上次生成中断，请点击重新生成')
@@ -161,7 +182,8 @@ export default function SmartPage() {
 
       if (res.status === 409) {
         const data = await res.json() as { taskId: string }
-        streamVersion(data.taskId)
+        // Existing running task — stream it; refresh version list when done
+        streamVersion(data.taskId, true)
         return
       }
 
@@ -174,7 +196,7 @@ export default function SmartPage() {
 
       const data = await res.json() as { taskId: string }
       setSelectedVer(data.taskId)
-      streamVersion(data.taskId)
+      streamVersion(data.taskId, true)  // refresh version list on completion
 
       // Add optimistic version entry (replaced on 'done' when loadVersions fires)
       setVersions(prev => {
@@ -196,10 +218,29 @@ export default function SmartPage() {
   function switchToVersion(ver: Version) {
     if (ver.id === selectedVer) return
     setSelectedVer(ver.id)
-    streamVersion(ver.id)
+    streamVersion(ver.id, false)  // viewing existing version, no list refresh needed
   }
 
   const isGenerating = status === 'loading' || status === 'streaming'
+
+  // 查询分块进度
+  useEffect(() => {
+    if (mode !== 'translate' || !selectedVer) {
+      setChunks([])
+      return
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    async function fetchChunks() {
+      const res = await fetch(`/api/smart/chunks/${selectedVer}`)
+      if (res.ok) {
+        const data = await res.json()
+        setChunks(data.chunks)
+      }
+      if (isGenerating) timer = setTimeout(fetchChunks, 2000)
+    }
+    fetchChunks()
+    return () => { if (timer) clearTimeout(timer) }
+  }, [mode, selectedVer, isGenerating])
 
   return (
     <div className="min-h-screen">
@@ -312,6 +353,25 @@ export default function SmartPage() {
             <Button variant="outline" size="sm" onClick={startNewTask}>
               重新生成
             </Button>
+          </div>
+        )}
+
+        {/* 分块进度，仅翻译模式显示 */}
+        {mode === 'translate' && chunks.length > 0 && (
+          <div className="mb-4 space-y-1">
+            {chunks.map((c, i) => (
+              <div key={i} className="flex items-center gap-2 text-xs">
+                <span className="w-12 text-right text-muted-foreground">{c.type}</span>
+                <span className="flex-1 truncate">{c.content.slice(0, 32)}{c.content.length > 32 ? '…' : ''}</span>
+                <span className={
+                  c.status === 'done' ? 'text-green-600 dark:text-green-400' :
+                  c.status === 'error' ? 'text-red-600 dark:text-red-400' :
+                  'text-yellow-600 dark:text-yellow-400'
+                }>
+                  {c.status === 'done' ? '✔️' : c.status === 'error' ? '❌' : '…'}
+                </span>
+              </div>
+            ))}
           </div>
         )}
       </article>

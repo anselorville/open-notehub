@@ -69,3 +69,21 @@ export const smartResults = sqliteTable('smart_results', {
 
 export type SmartResult = typeof smartResults.$inferSelect
 export type NewSmartResult = typeof smartResults.$inferInsert
+
+export const smartChunks = sqliteTable('smart_chunks', {
+  id:         text('id').primaryKey(),
+  resultId:   text('result_id').notNull().references(() => smartResults.id),
+  idx:        integer('idx').notNull(),
+  type:       text('type').notNull(),
+  meta:       text('meta').notNull(),
+  content:    text('content').notNull(),
+  translated: text('translated'),
+  status:     text('status').notNull().default('pending'),
+  error:      text('error'),
+}, (t) => ({
+  resultIdx: index('smart_chunks_result_idx').on(t.resultId),
+  uniqueIdx: uniqueIndex('smart_chunks_result_idx_unique').on(t.resultId, t.idx),
+}))
+
+export type SmartChunk = typeof smartChunks.$inferSelect
+export type NewSmartChunk = typeof smartChunks.$inferInsert

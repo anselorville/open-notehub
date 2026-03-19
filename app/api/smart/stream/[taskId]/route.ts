@@ -90,6 +90,17 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
   }
 
   const result = row.rows[0] as unknown as { status: string; result: string | null; error: string | null }
+
+  // Stale task: 'running' in DB but not in registry (server restarted).
+  // Mark as interrupted now so next POST can create a fresh task without hitting 409.
+  if (result.status === 'running') {
+    await db.run(sql`
+      UPDATE smart_results SET status = 'interrupted', completed_at = ${Date.now()}
+      WHERE id = ${taskId} AND status = 'running'
+    `).catch(() => {})
+    result.status = 'interrupted'
+  }
+
   const stream = new ReadableStream({
     start(controller) {
       const enc = new TextEncoder()
@@ -98,11 +109,9 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         controller.enqueue(enc.encode(sseEvent('done', {})))
       } else if (result.status === 'error') {
         controller.enqueue(enc.encode(sseEvent('error', { error: 'llm_failed', message: result.error ?? 'Unknown error' })))
-      } else if (result.status === 'interrupted') {
-        controller.enqueue(enc.encode(sseEvent('error', { error: 'interrupted', message: '生成中断，请点击重新生成' })))
       } else {
-        // still running but not in registry (edge case: process just started)
-        controller.enqueue(enc.encode(sseEvent('error', { error: 'not_ready', message: '任务启动中，请稍后重试' })))
+        // interrupted (or any other non-done status)
+        controller.enqueue(enc.encode(sseEvent('error', { error: 'interrupted', message: '生成中断，请点击重新生成' })))
       }
       controller.close()
     }

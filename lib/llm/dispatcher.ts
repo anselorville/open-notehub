@@ -6,7 +6,7 @@ import { db, schema } from '@/lib/db/client'
 import { eq, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { registerTask, emitDone, emitError } from './task-registry'
-import { runTranslate } from './processors/translate'
+import { runTranslateStructured } from './processors/translate_structured'
 import { runSummarize } from './processors/summarize'
 import { runBrainstorm } from './processors/brainstorm'
 
@@ -68,7 +68,8 @@ export async function launchTask(
   Promise.resolve().then(async () => {
     try {
       if (mode === 'translate') {
-        await runTranslate({ ctx, content, targetLang, resultId })
+        // 新结构化翻译
+        await runTranslateStructured({ ctx, content, targetLang, resultId })
       } else if (mode === 'summarize') {
         await runSummarize({ ctx, content, resultId })
       } else if (mode === 'brainstorm') {
