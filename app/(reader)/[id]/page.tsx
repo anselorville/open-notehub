@@ -6,6 +6,7 @@ import { ReadingProgress } from '@/components/ReadingProgress'
 import { Badge } from '@/components/ui/badge'
 import { formatDate } from '@/lib/utils'
 import Link from 'next/link'
+import { Sparkles } from 'lucide-react'
 
 interface Params {
   id: string
@@ -83,6 +84,19 @@ export default async function ReadingPage({ params }: { params: Params }) {
               ))}
             </div>
           )}
+
+          {/* 智读 button */}
+          <div className="flex gap-2 mt-4">
+            <Link
+              href={`/${doc.id}/smart`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm
+                         bg-zinc-900 dark:bg-zinc-100 text-zinc-100 dark:text-zinc-900
+                         hover:opacity-80 transition-opacity font-medium"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              智读
+            </Link>
+          </div>
         </header>
 
         <hr className="border-zinc-200 dark:border-zinc-700 mb-8" />
