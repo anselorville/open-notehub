@@ -137,7 +137,7 @@ export async function streamChat(opts: StreamOptions): Promise<void> {
   }
 
   if (collectedToolCalls.size > 0 && onToolCalls) {
-    onToolCalls([...collectedToolCalls.values()])
+    onToolCalls(Array.from(collectedToolCalls.values()))
   }
 }
 
