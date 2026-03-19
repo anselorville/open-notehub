@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
       sourceUrl: data.source_url ?? null,
       sourceType: data.source_type,
       tags: JSON.stringify(data.tags),
-      agentId: data.agent_id,
+      agentId: null,
       wordCount,
       createdAt: now,
       updatedAt: now,

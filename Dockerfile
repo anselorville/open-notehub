@@ -1,15 +1,15 @@
-FROM node:20-alpine AS base
+FROM node:20-slim AS base
 
 # Install dependencies only when needed
 FROM base AS deps
-RUN apk add --no-cache libc6-compat python3 make g++
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production
 
 # Build stage
 FROM base AS builder
-RUN apk add --no-cache libc6-compat python3 make g++
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
@@ -25,24 +25,26 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
+# sqlite3 CLI for running migrations at startup
+RUN apt-get update && apt-get install -y sqlite3 && rm -rf /var/lib/apt/lists/*
+
+# Create system user and data directory with correct ownership
+RUN groupadd --system --gid 1001 nodejs && \
+    useradd --system --uid 1001 --gid nodejs nextjs && \
+    mkdir -p /data && chown nextjs:nodejs /data
 
 # Copy built app
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Copy migration files
-COPY --from=builder /app/lib/db/migrations ./lib/db/migrations
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/node_modules/.bin ./node_modules/.bin
-COPY --from=builder /app/node_modules/drizzle-kit ./node_modules/drizzle-kit
+# Copy migration SQL files
+COPY --from=builder --chown=nextjs:nodejs /app/lib/db/migrations ./lib/db/migrations
 
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# Run DB migrations then start app
-CMD ["sh", "-c", "node node_modules/.bin/drizzle-kit migrate || true && node server.js"]
+# Apply all migration SQL files in order, then start the server
+CMD ["sh", "-c", "DB=${DATABASE_URL#file:} && for f in lib/db/migrations/*.sql; do sqlite3 \"$DB\" < \"$f\" 2>/dev/null || true; done && node server.js"]
