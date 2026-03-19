@@ -4,6 +4,7 @@ import {
   text,
   integer,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/sqlite-core'
 
 export const users = sqliteTable('users', {
@@ -61,6 +62,7 @@ export const smartResults = sqliteTable('smart_results', {
                  .default(sql`(unixepoch())`),
   completedAt: integer('completed_at', { mode: 'timestamp' }),
 }, (t) => ({
+  uniqueDocModeVersion: uniqueIndex('smart_results_doc_mode_version_unique').on(t.documentId, t.mode, t.version),
   docModeIdx:  index('smart_results_doc_mode_version_idx').on(t.documentId, t.mode, t.version),
   statusIdx:   index('smart_results_status_idx').on(t.status),
 }))
