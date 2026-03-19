@@ -56,6 +56,12 @@ export default function SmartPage() {
   const [docTitle, setDocTitle]       = useState('')
 
   const eventSourceRef = useRef<EventSource | null>(null)
+  const statusRef = useRef<Status>('empty')
+
+  const setStatusWithRef = (s: Status) => {
+    statusRef.current = s
+    setStatus(s)
+  }
 
   // Cleanup EventSource on unmount
   useEffect(() => {
@@ -74,18 +80,18 @@ export default function SmartPage() {
     eventSourceRef.current?.close()
     setContent('')
     setError('')
-    setStatus('loading')
+    setStatusWithRef('loading')
 
     const es = new EventSource(`/api/smart/stream/${resultId}`)
     eventSourceRef.current = es
 
     es.addEventListener('chunk', (e: MessageEvent) => {
-      setStatus('streaming')
+      setStatusWithRef('streaming')
       setContent(prev => prev + e.data)
     })
 
     es.addEventListener('done', () => {
-      setStatus('done')
+      setStatusWithRef('done')
       es.close()
       // Refresh versions to update timestamps
       loadVersions()
@@ -97,9 +103,9 @@ export default function SmartPage() {
         const parsed = JSON.parse(msgEvent.data) as { message?: string }
         setError(parsed.message ?? '生成失败')
       } catch {
-        if (status !== 'done') setError('连接中断')
+        if (statusRef.current !== 'done') setError('连接中断')
       }
-      setStatus('error')
+      setStatusWithRef('error')
       es.close()
     })
   }
@@ -118,11 +124,11 @@ export default function SmartPage() {
         if (latest.status === 'done' || latest.status === 'running') {
           streamVersion(latest.id)
         } else if (latest.status === 'interrupted') {
-          setStatus('error')
+          setStatusWithRef('error')
           setError('上次生成中断，请点击重新生成')
         }
       } else {
-        setStatus('empty')
+        setStatusWithRef('empty')
         setContent('')
       }
     } catch {
@@ -132,7 +138,7 @@ export default function SmartPage() {
   }, [id, mode])
 
   useEffect(() => {
-    setStatus('empty')
+    setStatusWithRef('empty')
     setContent('')
     setError('')
     setVersions([])
@@ -143,7 +149,7 @@ export default function SmartPage() {
 
   async function startNewTask() {
     try {
-      setStatus('loading')
+      setStatusWithRef('loading')
       setContent('')
       setError('')
 
@@ -162,7 +168,7 @@ export default function SmartPage() {
       if (!res.ok) {
         const data = await res.json() as { message?: string }
         setError(data.message ?? '启动失败')
-        setStatus('error')
+        setStatusWithRef('error')
         return
       }
 
@@ -183,7 +189,7 @@ export default function SmartPage() {
       })
     } catch {
       setError('请求失败，请重试')
-      setStatus('error')
+      setStatusWithRef('error')
     }
   }
 
