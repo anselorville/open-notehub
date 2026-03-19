@@ -89,7 +89,7 @@ export async function runSummarize(opts: SummarizeOptions): Promise<void> {
       signal: ctx.abortController.signal,
     })
     await flushQueue  // wait for all pending flushes
-  } catch (err) {
+  } catch {
     await flushQueue.catch(() => {})  // wait for pending flushes even on error
     // Graceful degradation: ALWAYS emit fallback on reduce failure
     // (regardless of how much was already accumulated)

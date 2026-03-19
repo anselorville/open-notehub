@@ -2,7 +2,7 @@
 // Generic tool-calling loop. No business logic — purely orchestrates
 // multi-round LLM ↔ tool conversations.
 
-import { chatOnce, Message, Tool, ToolCall } from './client'
+import { chatOnce, Message, Tool } from './client'
 
 export type ToolHandler = (args: Record<string, unknown>) => Promise<string>
 
