@@ -1,0 +1,26 @@
+# Development override for docker-compose.yml
+#
+# Usage:
+#   First time or after package.json changes:
+#     docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+#   Normal start (code already mounted, deps cached):
+#     docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+#   Stop:
+#     docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+#
+# After this, just edit files on your host — next dev hot-reloads instantly.
+# No rebuild needed for code changes.
+
+services:
+  learnhub:
+    build:
+      target: dev             # use the lightweight dev stage, not the production builder
+    volumes:
+      - .:/app                # bind-mount entire source tree from host
+      - /app/node_modules     # keep container's node_modules (don't overwrite with host's)
+      - /app/.next            # persist .next cache across restarts (faster cold starts)
+    environment:
+      - NODE_ENV=development
+      - WATCHPACK_POLLING=true  # reliable inotify fallback for Docker on macOS/Windows

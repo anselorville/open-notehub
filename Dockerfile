@@ -1,5 +1,20 @@
 FROM node:20-slim AS base
 
+# ── Dev stage ────────────────────────────────────────────────────────────────
+# Used by docker-compose.dev.yml only.
+# Source code is bind-mounted at runtime; only node_modules live in the image.
+# Rebuild only when package*.json changes (npm ci layer is cached otherwise).
+FROM base AS dev
+RUN apt-get update && apt-get install -y python3 make g++ sqlite3 && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+ENV NEXT_TELEMETRY_DISABLED=1
+EXPOSE 3000
+# Apply pending migrations, then start next dev
+CMD ["sh", "-c", "DB=${DATABASE_URL#file:} && for f in lib/db/migrations/*.sql; do sqlite3 \"$DB\" < \"$f\" 2>/dev/null || true; done && exec npx next dev"]
+
+# ── Production: install deps ──────────────────────────────────────────────────
 # Install dependencies only when needed
 FROM base AS deps
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*

@@ -4,3 +4,5 @@ node_modules
 .env.local
 *.md
 learnhub.db
+# keep docker-compose.dev.yml out of image build context
+docker-compose*.yml
