@@ -11,7 +11,7 @@ export interface TaskContext {
   docId:       string
   mode:        string
   accumulated: string          // all emitted text so far
-  subscribers: Array<{ onChunk: SubscriberCallback; onDone: DoneCallback; onError: ErrorCallback }>
+  subscribers: Set<{ onChunk: SubscriberCallback; onDone: DoneCallback; onError: ErrorCallback }>
   abortController: AbortController
 }
 
@@ -24,7 +24,7 @@ export function registerTask(taskId: string, docId: string, mode: string): TaskC
     docId,
     mode,
     accumulated: '',
-    subscribers: [],
+    subscribers: new Set(),
     abortController: new AbortController(),
   }
   registry.set(taskId, ctx)
@@ -44,8 +44,8 @@ export function removeTask(taskId: string): void {
  */
 export function emitChunk(ctx: TaskContext, chunk: string): void {
   ctx.accumulated += chunk
-  for (let i = 0; i < ctx.subscribers.length; i++) {
-    ctx.subscribers[i].onChunk(chunk)
+  for (const subscriber of ctx.subscribers) {
+    subscriber.onChunk(chunk)
   }
 }
 
@@ -53,8 +53,8 @@ export function emitChunk(ctx: TaskContext, chunk: string): void {
  * Signal task completion to all subscribers, then remove from registry.
  */
 export function emitDone(ctx: TaskContext): void {
-  for (let i = 0; i < ctx.subscribers.length; i++) {
-    ctx.subscribers[i].onDone()
+  for (const subscriber of ctx.subscribers) {
+    subscriber.onDone()
   }
   registry.delete(ctx.taskId)
 }
@@ -63,8 +63,8 @@ export function emitDone(ctx: TaskContext): void {
  * Signal task error to all subscribers, then remove from registry.
  */
 export function emitError(ctx: TaskContext, message: string): void {
-  for (let i = 0; i < ctx.subscribers.length; i++) {
-    ctx.subscribers[i].onError(message)
+  for (const subscriber of ctx.subscribers) {
+    subscriber.onError(message)
   }
   registry.delete(ctx.taskId)
 }
@@ -76,9 +76,8 @@ export function subscribe(
   ctx: TaskContext,
   callbacks: { onChunk: SubscriberCallback; onDone: DoneCallback; onError: ErrorCallback }
 ): () => void {
-  ctx.subscribers.push(callbacks)
+  ctx.subscribers.add(callbacks)
   return () => {
-    const idx = ctx.subscribers.indexOf(callbacks)
-    if (idx !== -1) ctx.subscribers.splice(idx, 1)
+    ctx.subscribers.delete(callbacks)
   }
 }
