@@ -230,17 +230,40 @@ export default function SmartPage() {
       return
     }
     let timer: ReturnType<typeof setTimeout> | undefined
+    let cancelled = false
+
     async function fetchChunks() {
-      const res = await fetch(`/api/smart/chunks/${selectedVer}`)
-      if (res.ok) {
-        const data = await res.json()
-        setChunks(data.chunks)
+      if (cancelled) return
+      try {
+        const res = await fetch(`/api/smart/chunks/${selectedVer}`)
+        if (!cancelled && res.ok) {
+          const data = await res.json() as { chunks: Chunk[] }
+          setChunks(prev => {
+            // Avoid re-render if data hasn't changed
+            const prevSig = prev.map(c => c.status).join(',')
+            const nextSig = data.chunks.map((c: Chunk) => c.status).join(',')
+            return prevSig === nextSig && prev.length === data.chunks.length ? prev : data.chunks
+          })
+          // Stop polling once all chunks are settled
+          const allDone = data.chunks.length > 0 &&
+            data.chunks.every((c: Chunk) => c.status === 'done' || c.status === 'error')
+          if (!cancelled && !allDone &&
+              (statusRef.current === 'loading' || statusRef.current === 'streaming')) {
+            timer = setTimeout(fetchChunks, 2000)
+          }
+          return
+        }
+      } catch { /* ignore */ }
+      if (!cancelled && (statusRef.current === 'loading' || statusRef.current === 'streaming')) {
+        timer = setTimeout(fetchChunks, 2000)
       }
-      if (isGenerating) timer = setTimeout(fetchChunks, 2000)
     }
     fetchChunks()
-    return () => { if (timer) clearTimeout(timer) }
-  }, [mode, selectedVer, isGenerating])
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [mode, selectedVer])
 
   return (
     <div className="min-h-screen">

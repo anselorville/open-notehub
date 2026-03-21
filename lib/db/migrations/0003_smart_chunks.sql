@@ -11,5 +11,5 @@ CREATE TABLE IF NOT EXISTS smart_chunks (
   error      TEXT,
   UNIQUE(result_id, idx)
 );
-
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS smart_chunks_result_idx ON smart_chunks(result_id);

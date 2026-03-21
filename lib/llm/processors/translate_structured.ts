@@ -16,7 +16,34 @@ interface TranslateStructuredOptions {
   resultId:   string
 }
 
-const TRANSLATE_PROMPT = (meta: any, targetLang: string) => `你是专业翻译。请只翻译 content 字段内容，保持 meta 字段不变，输出 JSON：{\n  \"type\": \"${meta.type}\",\n  \"meta\": ${JSON.stringify(meta.meta)},\n  \"content\": \"（翻译后的内容）\"\n}\n目标语言：${targetLang}`
+const SYSTEM_PROMPT = (type: string, meta: Record<string, unknown>, targetLang: string) => `\
+你是专业翻译引擎，负责将 Markdown 内容片段翻译成${targetLang}。
+
+## 严格输出规则
+- 只输出一个 JSON 对象，不得有任何其他内容
+- 禁止使用 markdown 代码围栏（\`\`\`）或任何包裹格式
+- 禁止添加解释、注释或额外字段
+- 字符串内的换行用 \\n 转义
+
+## 输出格式
+{"type":"<原样复制>","meta":<原样复制>,"content":"<翻译后内容>"}
+
+## 本次任务
+- 块类型: ${type}
+- meta（原样复制，不翻译）: ${JSON.stringify(meta)}
+- 翻译目标语言: ${targetLang}
+
+## 示例
+输入: A quick brown fox.
+输出: {"type":"paragraph","meta":{},"content":"一只敏捷的棕色狐狸。"}
+
+现在请翻译用户提供的内容，直接输出 JSON，不要有任何其他文字。`
+
+/** Strip markdown code fences that some LLMs wrap around JSON output */
+function extractJson(raw: string): string {
+  const match = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+  return match ? match[1].trim() : raw.trim()
+}
 
 async function flushChunk(chunkId: string, translated: string, status: string, error?: string) {
   await db.run(sql`
@@ -46,15 +73,15 @@ export async function runTranslateStructured(opts: TranslateStructuredOptions): 
     let status = 'done'
     let error = ''
     try {
-      const prompt = TRANSLATE_PROMPT({ type, meta: JSON.parse(meta) }, targetLang)
+      const systemPrompt = SYSTEM_PROMPT(type, JSON.parse(meta), targetLang)
       const messages = [
-        { role: 'system' as const, content: prompt },
+        { role: 'system' as const, content: systemPrompt },
         { role: 'user' as const, content: chunkContent },
       ]
       const result = await chatOnce({ messages, maxTokens: 3000 })
-      // 解析 LLM 返回的 JSON
-      const parsed = JSON.parse(result.content)
-      translated = parsed.content
+      // Strip potential markdown code fences before parsing JSON
+      const parsed = JSON.parse(extractJson(result.content))
+      translated = parsed.content ?? parsed.translated ?? ''
     } catch (e: any) {
       status = 'error'
       error = e?.message || '翻译失败'
