@@ -9,7 +9,11 @@
     "lint": "next lint",
     "db:migrate": "tsx lib/db/migrate.ts",
     "db:seed": "tsx lib/db/seed.ts",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "validate:llm": "tsx scripts/validation/llm.ts",
+    "validate:search": "tsx scripts/validation/search.ts",
+    "validate:smart-translate": "tsx scripts/validation/smart-translate.ts",
+    "validate:infra": "tsx scripts/validation/all.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.5.6",

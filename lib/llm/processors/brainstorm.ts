@@ -1,20 +1,16 @@
 // lib/llm/processors/brainstorm.ts
-// Tool-calling brainstorm agent with web search.
-// Feeds compressed content to sub-agent; sub-agent may call search N times.
+// Polling-friendly brainstorm pipeline with persisted round progress.
 
 import { db, schema } from '@/lib/db/client'
-import { eq, sql } from 'drizzle-orm'
-import { chatOnce } from '../client'
+import { eq } from 'drizzle-orm'
+import { chatOnce, Message } from '../client'
 import { BRAINSTORM_SYSTEM, BRAINSTORM_SEARCH_TOOL } from '../prompts'
-import { runSubagent } from '../subagent'
-import { TaskContext, emitChunk } from '../task-registry'
 import { search as anspireSearch } from '@/lib/search/anspire'
+import { completeSmartResult, failSmartResult, setSmartProgress, toErrorCode, withTimeoutSignal } from './shared'
 
-const MAX_CONTENT_CHARS = 2000
-
-async function flushResult(resultId: string, text: string): Promise<void> {
-  await db.run(sql`UPDATE smart_results SET result = ${text} WHERE id = ${resultId}`)
-}
+const MAX_CONTENT_CHARS = 8000
+const MAX_ROUNDS = 5
+const MAX_TOOL_CALLS_PER_ROUND = 3
 
 /**
  * Compress content for brainstorm context.
@@ -27,7 +23,7 @@ async function getCompressedContent(docId: string, content: string, title: strin
     columns: { summary: true },
   })
   if (doc?.summary) {
-    const s = doc.summary
+    const s = doc.summary.trim()
     return s.length <= MAX_CONTENT_CHARS ? s : s.slice(0, MAX_CONTENT_CHARS) + '\n...(摘要已截断)'
   }
 
@@ -36,13 +32,14 @@ async function getCompressedContent(docId: string, content: string, title: strin
     try {
       const result = await chatOnce({
         messages: [
-          { role: 'system', content: '请对以下文章进行500字以内的摘要，保留核心论点和关键数据：' },
+          { role: 'system', content: '请将以下文章压缩成200字以内的中文摘要，保留核心论点和关键事实。' },
           { role: 'user',   content: content.slice(0, 6000) },
         ],
-        maxTokens: 800,
+        maxTokens: 300,
+        signal: withTimeoutSignal(),
       })
       if (result.content) {
-        const s = result.content
+        const s = result.content.trim()
         return s.length <= MAX_CONTENT_CHARS ? s : s.slice(0, MAX_CONTENT_CHARS) + '\n...(摘要已截断)'
       }
     } catch {
@@ -55,7 +52,6 @@ async function getCompressedContent(docId: string, content: string, title: strin
 }
 
 interface BrainstormOptions {
-  ctx:      TaskContext
   content:  string
   title:    string
   docId:    string
@@ -63,43 +59,129 @@ interface BrainstormOptions {
 }
 
 export async function runBrainstorm(opts: BrainstormOptions): Promise<void> {
-  const { ctx, content, title, docId, resultId } = opts
+  const { content, title, docId, resultId } = opts
 
   const compressed = await getCompressedContent(docId, content, title)
   const searchQueries: string[] = []
-  let flushQueue: Promise<void> = Promise.resolve()
+  let searchUnavailable = false
+  const progressSections: string[] = []
+  let persistedProgress = ''
 
-  await runSubagent({
-    systemPrompt: BRAINSTORM_SYSTEM,
-    userMessage:  `文章标题: ${title}\n\n文章内容:\n${compressed}`,
-    tools:        [BRAINSTORM_SEARCH_TOOL],
-    toolHandlers: {
-      search: async (args) => {
-        const query = String(args.query ?? '')
-        searchQueries.push(query)
-        try {
-          const results = await anspireSearch(query, 5)
-          return results.map(r => `**${r.title}**\n${r.snippet}\n来源: ${r.url}`).join('\n\n')
-        } catch {
-          return '搜索暂时不可用，请继续基于已有信息分析。'
+  const messages: Message[] = [
+    { role: 'system', content: BRAINSTORM_SYSTEM },
+    { role: 'user', content: `文章标题: ${title}\n\n文章内容:\n${compressed}` },
+  ]
+
+  const persistRound = async (round: number, contentChunk: string) => {
+    if (!contentChunk.trim()) return
+    progressSections.push(`### Round ${round}\n${contentChunk.trim()}`)
+    persistedProgress = progressSections.join('\n\n')
+    await setSmartProgress(resultId, persistedProgress, {
+      phase: 'tool_loop',
+      round,
+      totalRounds: MAX_ROUNDS,
+      searchQueries,
+    })
+  }
+
+  const runSearch = async (query: string): Promise<string> => {
+    searchQueries.push(query)
+    try {
+      const results = await anspireSearch(query, 5)
+      if (!results.length) {
+        searchUnavailable = true
+        return '搜索结果不可用'
+      }
+      return results
+        .map((result) => `**${result.title}**\n${result.snippet}\n来源: ${result.url}`)
+        .join('\n\n')
+    } catch {
+      searchUnavailable = true
+      return '搜索结果不可用'
+    }
+  }
+
+  let finalOutput = ''
+
+  for (let round = 1; round <= MAX_ROUNDS; round++) {
+    let response
+    try {
+      response = await chatOnce({
+        messages,
+        tools: [BRAINSTORM_SEARCH_TOOL],
+        maxTokens: 2000,
+        signal: withTimeoutSignal(),
+      })
+    } catch (error) {
+      if (persistedProgress) break
+      await failSmartResult(resultId, toErrorCode(error))
+      return
+    }
+
+    const assistantContent = response.content?.trim() ?? ''
+    if (!response.toolCalls?.length) {
+      finalOutput = assistantContent
+      break
+    }
+
+    await persistRound(round, assistantContent)
+
+    messages.push({
+      role: 'assistant',
+      content: assistantContent || null,
+      tool_calls: response.toolCalls,
+    })
+
+    for (const toolCall of response.toolCalls.slice(0, MAX_TOOL_CALLS_PER_ROUND)) {
+      let toolResult = '搜索结果不可用'
+
+      try {
+        const args = JSON.parse(toolCall.function.arguments) as { query?: string }
+        if (toolCall.function.name === 'search') {
+          toolResult = await runSearch(String(args.query ?? ''))
+        } else {
+          toolResult = '搜索结果不可用'
         }
-      },
-    },
-    onDelta: (chunk) => {
-      emitChunk(ctx, chunk)
-      flushQueue = flushQueue
-        .then(() => flushResult(resultId, ctx.accumulated))
-        .catch(e => console.error('[brainstorm/flush]', e))
-    },
-    signal: ctx.abortController.signal,
+      } catch {
+        toolResult = '搜索结果不可用'
+      }
+
+      messages.push({
+        role: 'tool',
+        content: toolResult,
+        tool_call_id: toolCall.id,
+      })
+    }
+  }
+
+  if (!finalOutput) {
+    try {
+      const fallbackResult = await chatOnce({
+        messages,
+        maxTokens: 2000,
+        signal: withTimeoutSignal(),
+      })
+      finalOutput = fallbackResult.content.trim()
+    } catch {
+      finalOutput = persistedProgress
+    }
+  }
+
+  if (!finalOutput.trim()) {
+    await failSmartResult(resultId, 'brainstorm_no_output', persistedProgress, {
+      phase: 'tool_loop',
+      searchQueries,
+    })
+    return
+  }
+
+  if (searchUnavailable && !finalOutput.includes('搜索结果不可用')) {
+    finalOutput = `${finalOutput.trim()}\n\n> 搜索结果不可用`
+  }
+
+  await completeSmartResult(resultId, finalOutput.trim(), {
+    phase: 'final',
+    searchQueries,
+    degraded: finalOutput.trim() === persistedProgress.trim(),
   })
-
-  await flushQueue
-
-  const meta = JSON.stringify({ search_queries: searchQueries })
-  await db.run(sql`
-    UPDATE smart_results
-    SET status = 'done', completed_at = unixepoch(), meta = ${meta}
-    WHERE id = ${resultId}
-  `)
 }

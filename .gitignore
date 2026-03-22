@@ -36,5 +36,13 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+*.db.*
 
-*.db
+.cursor
+.gemini
+.vscode
+.idea
+.opencode
+.codex
+.*.log
+*.log.*

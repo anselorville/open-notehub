@@ -43,7 +43,26 @@ interface ChatOnceOptions {
 interface ChatOnceResult {
   content: string
   toolCalls?: ToolCall[]
+  model?: string
 }
+
+export class LlmApiError extends Error {
+  status: number
+  body: string
+  model: string
+  providerCode?: string
+
+  constructor(message: string, options: { status: number; body: string; model: string; providerCode?: string }) {
+    super(message)
+    this.name = 'LlmApiError'
+    this.status = options.status
+    this.body = options.body
+    this.model = options.model
+    this.providerCode = options.providerCode
+  }
+}
+
+let cachedAccessibleModel: string | null = null
 
 function getConfig() {
   const baseUrl = process.env.LLM_BASE_URL
@@ -52,7 +71,79 @@ function getConfig() {
   if (!baseUrl || !apiKey || !model) {
     throw new Error('LLM_BASE_URL, LLM_API_KEY, LLM_MODEL must be set')
   }
-  return { baseUrl, apiKey, model }
+
+  const fallbacks = (process.env.LLM_MODEL_FALLBACKS ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+
+  return { baseUrl, apiKey, model, fallbacks }
+}
+
+function parseProviderCode(body: string): string | undefined {
+  try {
+    const parsed = JSON.parse(body) as { error?: { code?: string } }
+    return parsed.error?.code
+  } catch {
+    return undefined
+  }
+}
+
+function getCandidateModels(primary: string, fallbacks: string[], baseUrl: string): string[] {
+  const defaults =
+    baseUrl.includes('open.bigmodel.cn')
+      ? ['glm-4.5-air', 'glm-4.6', 'glm-4.7']
+      : []
+
+  return Array.from(
+    new Set([
+      ...(cachedAccessibleModel ? [cachedAccessibleModel] : []),
+      primary,
+      ...fallbacks,
+      ...defaults,
+    ].filter(Boolean))
+  )
+}
+
+async function openChatCompletion(
+  body: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<{ response: Response; model: string }> {
+  const { baseUrl, apiKey, model, fallbacks } = getConfig()
+  const candidates = getCandidateModels(model, fallbacks, baseUrl)
+  const failures: LlmApiError[] = []
+
+  for (const candidate of candidates) {
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ ...body, model: candidate }),
+      signal,
+    })
+
+    if (res.ok) {
+      cachedAccessibleModel = candidate
+      return { response: res, model: candidate }
+    }
+
+    const text = await res.text().catch(() => '')
+    failures.push(new LlmApiError(
+      `LLM API error for model ${candidate}: ${res.status} ${text.slice(0, 200)}`,
+      {
+        status: res.status,
+        body: text,
+        model: candidate,
+        providerCode: parseProviderCode(text),
+      }
+    ))
+  }
+
+  const last = failures[failures.length - 1]
+  if (last) throw last
+  throw new Error('LLM request failed before receiving a response')
 }
 
 /**
@@ -60,38 +151,24 @@ function getConfig() {
  * Calls onToolCalls if the model returns tool calls (non-streaming fallback).
  */
 export async function streamChat(opts: StreamOptions): Promise<void> {
-  const { baseUrl, apiKey, model } = getConfig()
   const { messages, tools, onDelta, onToolCalls, maxTokens = 4000, signal } = opts
 
   const body: Record<string, unknown> = {
-    model,
     messages,
     stream: true,
     max_tokens: maxTokens,
   }
   if (tools?.length) body.tools = tools
 
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-    signal,
-  })
+  const { response } = await openChatCompletion(body, signal)
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`LLM API error: ${res.status} ${text.slice(0, 200)}`)
-  }
-
-  const reader = res.body?.getReader()
+  const reader = response.body?.getReader()
   if (!reader) throw new Error('No response body')
 
   const decoder = new TextDecoder()
   let buffer = ''
   const collectedToolCalls: Map<number, ToolCall> = new Map()
+  let sawDone = false
 
   while (true) {
     const { done, value } = await reader.read()
@@ -104,7 +181,10 @@ export async function streamChat(opts: StreamOptions): Promise<void> {
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue
       const data = line.slice(6).trim()
-      if (data === '[DONE]') return
+      if (data === '[DONE]') {
+        sawDone = true
+        break
+      }
 
       try {
         const parsed = JSON.parse(data)
@@ -134,6 +214,8 @@ export async function streamChat(opts: StreamOptions): Promise<void> {
         // Ignore parse errors on individual SSE lines
       }
     }
+
+    if (sawDone) break
   }
 
   if (collectedToolCalls.size > 0 && onToolCalls) {
@@ -145,36 +227,22 @@ export async function streamChat(opts: StreamOptions): Promise<void> {
  * One-shot (non-streaming) chat. Returns full content and optional tool calls.
  */
 export async function chatOnce(opts: ChatOnceOptions): Promise<ChatOnceResult> {
-  const { baseUrl, apiKey, model } = getConfig()
   const { messages, tools, maxTokens = 2000, signal } = opts
 
   const body: Record<string, unknown> = {
-    model,
     messages,
     stream: false,
     max_tokens: maxTokens,
   }
   if (tools?.length) body.tools = tools
 
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-    signal,
-  })
+  const { response, model } = await openChatCompletion(body, signal)
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`LLM API error: ${res.status} ${text.slice(0, 200)}`)
-  }
-
-  const data = await res.json()
+  const data = await response.json()
   const choice = data.choices?.[0]
   return {
     content:   choice?.message?.content ?? '',
     toolCalls: choice?.message?.tool_calls,
+    model,
   }
 }

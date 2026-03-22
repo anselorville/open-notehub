@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
@@ -9,405 +9,599 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { RefreshCw, ArrowLeft, BookOpen } from 'lucide-react'
 
 type Mode = 'translate' | 'summarize' | 'brainstorm'
-type Status = 'empty' | 'loading' | 'streaming' | 'done' | 'error'
+type TaskStatus = 'running' | 'done' | 'error' | 'interrupted'
+type ViewStatus = 'empty' | 'loading' | TaskStatus
 
 interface Version {
-  id:           string
-  version:      number
-  status:       string
-  created_at:   string
-  completed_at: string | null
+  taskId: string
+  version: number
+  status: TaskStatus
+  createdAt: string
+  completedAt: string | null
 }
 
-const MODES: { key: Mode; label: string; emoji: string }[] = [
-  { key: 'translate',  label: '翻译',    emoji: '🌐' },
-  { key: 'summarize',  label: '摘要',    emoji: '📋' },
+interface TaskSnapshot {
+  taskId: string
+  status: TaskStatus
+  result: string
+  version: number
+  createdAt: string
+  completedAt: string | null
+  error: string | null
+  meta?: Record<string, unknown> | null
+}
+
+interface ModeState {
+  loaded: boolean
+  versions: Version[]
+  selectedTaskId: string | null
+  status: ViewStatus
+  content: string
+  error: string
+  meta: Record<string, unknown> | null
+  pollBlocked: boolean
+}
+
+const MODES: Array<{ key: Mode; label: string; emoji: string }> = [
+  { key: 'translate', label: '翻译', emoji: '🌐' },
+  { key: 'summarize', label: '摘要', emoji: '📋' },
   { key: 'brainstorm', label: '头脑风暴', emoji: '💡' },
 ]
 
 const MODE_LABELS: Record<Mode, string> = {
-  translate:  '翻译',
-  summarize:  '摘要',
+  translate: '翻译',
+  summarize: '摘要',
   brainstorm: '头脑风暴',
 }
 
-function formatVersionTime(iso: string): string {
-  const d = new Date(iso)
-  const now = new Date()
-  const isToday = d.toDateString() === now.toDateString()
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`
-  if (isToday) return `今天 ${time}`
-  const yesterday = new Date(now)
-  yesterday.setDate(now.getDate() - 1)
-  if (d.toDateString() === yesterday.toDateString()) return `昨天 ${time}`
-  return `${d.getMonth() + 1}/${d.getDate()} ${time}`
+const INITIAL_MODE_STATE: Record<Mode, ModeState> = {
+  translate: {
+    loaded: false,
+    versions: [],
+    selectedTaskId: null,
+    status: 'empty',
+    content: '',
+    error: '',
+    meta: null,
+    pollBlocked: false,
+  },
+  summarize: {
+    loaded: false,
+    versions: [],
+    selectedTaskId: null,
+    status: 'empty',
+    content: '',
+    error: '',
+    meta: null,
+    pollBlocked: false,
+  },
+  brainstorm: {
+    loaded: false,
+    versions: [],
+    selectedTaskId: null,
+    status: 'empty',
+    content: '',
+    error: '',
+    meta: null,
+    pollBlocked: false,
+  },
 }
 
-// 结构化分块进度
-type Chunk = { idx: number; type: string; meta: Record<string, unknown>; content: string; translated: string; status: string; error: string }
+function formatVersionTime(iso: string): string {
+  const date = new Date(iso)
+  const now = new Date()
+  const isToday = date.toDateString() === now.toDateString()
+  const pad = (value: number) => String(value).padStart(2, '0')
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+
+  if (isToday) return `今天 ${time}`
+
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (date.toDateString() === yesterday.toDateString()) return `昨天 ${time}`
+
+  return `${date.getMonth() + 1}/${date.getDate()} ${time}`
+}
+
+function getProgressText(meta: Record<string, unknown> | null, status: ViewStatus): string {
+  if (!meta) {
+    if (status === 'running' || status === 'loading') return '处理中...'
+    return ''
+  }
+
+  const totalChunks = typeof meta.totalChunks === 'number' ? meta.totalChunks : null
+  const completedChunks = typeof meta.completedChunks === 'number' ? meta.completedChunks : null
+  const phase = typeof meta.phase === 'string' ? meta.phase : null
+  const round = typeof meta.round === 'number' ? meta.round : null
+  const totalRounds = typeof meta.totalRounds === 'number' ? meta.totalRounds : null
+
+  if (totalChunks && completedChunks !== null) {
+    if (phase === 'map') return `已完成 ${completedChunks} / ${totalChunks} 个分块摘要`
+    return `已完成 ${completedChunks} / ${totalChunks} 个分块`
+  }
+
+  if (round && totalRounds) {
+    return `头脑风暴进行中，第 ${round} / ${totalRounds} 轮`
+  }
+
+  if (phase === 'reduce') return '正在整理最终结果...'
+  if (phase === 'final') return '正在生成最终结果...'
+  if (status === 'running' || status === 'loading') return '处理中...'
+
+  return ''
+}
+
+function toViewStatus(snapshot: TaskSnapshot): ViewStatus {
+  if (snapshot.status === 'running') {
+    return snapshot.result ? 'running' : 'loading'
+  }
+
+  return snapshot.status
+}
 
 export default function SmartPage() {
   const { id } = useParams<{ id: string }>()
 
-  const [chunks, setChunks]           = useState<Chunk[]>([])
-  const [mode, setMode]               = useState<Mode>('translate')
-  const [status, setStatus]           = useState<Status>('empty')
-  const [content, setContent]         = useState('')
-  const [error, setError]             = useState('')
-  const [versions, setVersions]       = useState<Version[]>([])
-  const [selectedVer, setSelectedVer] = useState<string | null>(null)
-  const [docTitle, setDocTitle]       = useState('')
+  const [mode, setMode] = useState<Mode>('translate')
+  const [docTitle, setDocTitle] = useState('')
+  const [modeStates, setModeStates] = useState<Record<Mode, ModeState>>(INITIAL_MODE_STATE)
 
-  const eventSourceRef = useRef<EventSource | null>(null)
-  const statusRef = useRef<Status>('empty')
+  const modeRef = useRef(mode)
+  const statesRef = useRef(modeStates)
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pollInFlightRef = useRef(false)
+  const pollFailureCountRef = useRef(0)
 
-  const setStatusWithRef = (s: Status) => {
-    statusRef.current = s
-    setStatus(s)
+  useEffect(() => {
+    modeRef.current = mode
+  }, [mode])
+
+  useEffect(() => {
+    statesRef.current = modeStates
+  }, [modeStates])
+
+  const updateModeState = (targetMode: Mode, updater: (state: ModeState) => ModeState) => {
+    setModeStates((current) => ({
+      ...current,
+      [targetMode]: updater(current[targetMode]),
+    }))
   }
 
-  // Cleanup EventSource on unmount
-  useEffect(() => {
-    return () => { eventSourceRef.current?.close() }
-  }, [])
-
-  // Fetch doc title on mount
-  useEffect(() => {
-    fetch(`/api/documents/${id}`)
-      .then(r => r.json())
-      .then((d: { title?: string }) => setDocTitle(d.title ?? ''))
-      .catch(() => {})
-  }, [id])
-
-  // refreshOnDone=true: calls loadVersions after done (for newly launched tasks)
-  // refreshOnDone=false: just updates version chip in-place (for pre-existing tasks)
-  function streamVersion(resultId: string, refreshOnDone = false) {
-    eventSourceRef.current?.close()
-    setContent('')
-    setError('')
-    setStatusWithRef('loading')
-
-    const es = new EventSource(`/api/smart/stream/${resultId}`)
-    eventSourceRef.current = es
-
-    es.addEventListener('chunk', (e: MessageEvent) => {
-      setStatusWithRef('streaming')
-      setContent(prev => prev + e.data)
-    })
-
-    es.addEventListener('done', () => {
-      setStatusWithRef('done')
-      es.close()
-      if (refreshOnDone) {
-        // Refresh version list to get real completed_at timestamp
-        loadVersions()
-      } else {
-        // Update version chip in-place to avoid triggering loadVersions loop
-        setVersions(prev => prev.map(v =>
-          v.id === resultId
-            ? { ...v, status: 'done', completed_at: new Date().toISOString() }
-            : v
-        ))
-      }
-    })
-
-    es.addEventListener('error', (e: Event) => {
-      // Ignore connection-close errors when we already finished successfully
-      if (statusRef.current === 'done') {
-        es.close()
-        return
-      }
-      const msgEvent = e as MessageEvent
-      try {
-        const parsed = JSON.parse(msgEvent.data) as { message?: string }
-        setError(parsed.message ?? '生成失败')
-      } catch {
-        setError('连接中断')
-      }
-      setStatusWithRef('error')
-      es.close()
-    })
+  const stopPolling = () => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
   }
 
-  const loadVersions = useCallback(async () => {
+  const mergeVersion = (versions: Version[], snapshot: TaskSnapshot): Version[] => {
+    const next = versions.some((version) => version.taskId === snapshot.taskId)
+      ? versions.map((version) =>
+          version.taskId === snapshot.taskId
+            ? {
+                ...version,
+                status: snapshot.status,
+                version: snapshot.version,
+                createdAt: snapshot.createdAt,
+                completedAt: snapshot.completedAt,
+              }
+            : version
+        )
+      : [
+          {
+            taskId: snapshot.taskId,
+            version: snapshot.version,
+            status: snapshot.status,
+            createdAt: snapshot.createdAt,
+            completedAt: snapshot.completedAt,
+          },
+          ...versions,
+        ]
+
+    return next
+      .slice()
+      .sort((left, right) => right.version - left.version)
+      .slice(0, 10)
+  }
+
+  const schedulePoll = (delayMs: number) => {
+    stopPolling()
+    pollTimerRef.current = setTimeout(() => {
+      void pollActiveMode()
+    }, delayMs)
+  }
+
+  const fetchTaskStatus = async (
+    targetMode: Mode,
+    taskId: string,
+    options: { scheduleNext?: boolean } = {}
+  ): Promise<void> => {
+    if (options.scheduleNext && pollInFlightRef.current) return
+
+    if (options.scheduleNext) {
+      pollInFlightRef.current = true
+    }
+
     try {
-      const res = await fetch(`/api/smart/${id}/${mode}`)
-      if (!res.ok) return
-      const data = await res.json() as { versions: Version[] }
-      // Replace state fully from DB (clears any optimistic entries)
-      setVersions(data.versions ?? [])
+      const response = await fetch(`/api/smart/${id}/${targetMode}/${taskId}`, {
+        cache: 'no-store',
+      })
 
-      const latest = data.versions?.[0]
-      if (latest) {
-        setSelectedVer(latest.id)
-        if (latest.status === 'done' || latest.status === 'running') {
-          // refreshOnDone=false: don't trigger loadVersions again (prevents infinite loop)
-          streamVersion(latest.id, false)
-        } else if (latest.status === 'interrupted') {
-          setStatusWithRef('error')
-          setError('上次生成中断，请点击重新生成')
-        }
+      if (!response.ok) {
+        throw new Error(`status_${response.status}`)
+      }
+
+      const snapshot = (await response.json()) as TaskSnapshot
+      pollFailureCountRef.current = 0
+
+      updateModeState(targetMode, (state) => ({
+        ...state,
+        loaded: true,
+        selectedTaskId: snapshot.taskId,
+        status: toViewStatus(snapshot),
+        content: snapshot.result ?? '',
+        error:
+          snapshot.status === 'error'
+            ? snapshot.error ?? '生成失败'
+            : snapshot.status === 'interrupted'
+              ? '任务已中断，请重新发起'
+              : '',
+        meta: snapshot.meta ?? null,
+        pollBlocked: false,
+        versions: mergeVersion(state.versions, snapshot),
+      }))
+
+      if (
+        options.scheduleNext &&
+        targetMode === modeRef.current &&
+        snapshot.status === 'running' &&
+        !document.hidden
+      ) {
+        schedulePoll(2000)
       } else {
-        setStatusWithRef('empty')
-        setContent('')
+        stopPolling()
       }
     } catch {
-      // ignore
+      if (!options.scheduleNext || targetMode !== modeRef.current) {
+        return
+      }
+
+      pollFailureCountRef.current += 1
+      const delayMs = Math.min(30_000, 2_000 * 2 ** (pollFailureCountRef.current - 1))
+
+      if (pollFailureCountRef.current >= 5) {
+        updateModeState(targetMode, (state) => ({
+          ...state,
+          pollBlocked: true,
+          error: '轮询连续失败，请手动刷新页面后恢复。',
+        }))
+        stopPolling()
+        return
+      }
+
+      schedulePoll(delayMs)
+    } finally {
+      if (options.scheduleNext) {
+        pollInFlightRef.current = false
+      }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, mode])
+  }
 
-  useEffect(() => {
-    setStatusWithRef('empty')
-    setContent('')
-    setError('')
-    setVersions([])
-    setSelectedVer(null)
-    eventSourceRef.current?.close()
-    loadVersions()
-  }, [mode, loadVersions])
+  const pollActiveMode = async () => {
+    const currentMode = modeRef.current
+    const state = statesRef.current[currentMode]
 
-  async function startNewTask() {
+    if (
+      document.hidden ||
+      state.pollBlocked ||
+      !state.selectedTaskId ||
+      (state.status !== 'running' && state.status !== 'loading')
+    ) {
+      stopPolling()
+      return
+    }
+
+    await fetchTaskStatus(currentMode, state.selectedTaskId, { scheduleNext: true })
+  }
+
+  const loadVersions = async (targetMode: Mode) => {
     try {
-      setStatusWithRef('loading')
-      setContent('')
-      setError('')
+      const response = await fetch(`/api/smart/${id}/${targetMode}`, {
+        cache: 'no-store',
+      })
+      if (!response.ok) return
 
-      const res = await fetch(`/api/smart/${id}/${mode}`, {
+      const data = (await response.json()) as { versions: Version[] }
+      const versions = data.versions ?? []
+      const previousState = statesRef.current[targetMode]
+      const selectedTaskId =
+        previousState.selectedTaskId && versions.some((version) => version.taskId === previousState.selectedTaskId)
+          ? previousState.selectedTaskId
+          : versions[0]?.taskId ?? null
+
+      updateModeState(targetMode, (state) => ({
+        ...state,
+        loaded: true,
+        versions,
+        selectedTaskId,
+        status: versions.length === 0 ? 'empty' : state.status,
+        content: versions.length === 0 ? '' : state.content,
+        error: versions.length === 0 ? '' : state.error,
+        meta: versions.length === 0 ? null : state.meta,
+        pollBlocked: versions.length === 0 ? false : state.pollBlocked,
+      }))
+
+      if (selectedTaskId) {
+        await fetchTaskStatus(targetMode, selectedTaskId, {
+          scheduleNext: targetMode === modeRef.current && !document.hidden,
+        })
+      }
+    } catch {
+      // Ignore list errors here; the page can retry via the action button.
+    }
+  }
+
+  const startNewTask = async () => {
+    stopPolling()
+    pollFailureCountRef.current = 0
+
+    updateModeState(mode, (state) => ({
+      ...state,
+      status: 'loading',
+      content: '',
+      error: '',
+      meta: null,
+      pollBlocked: false,
+    }))
+
+    try {
+      const response = await fetch(`/api/smart/${id}/${mode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       })
 
-      if (res.status === 409) {
-        const data = await res.json() as { taskId: string }
-        // Existing running task — stream it; refresh version list when done
-        streamVersion(data.taskId, true)
+      if (response.status === 409) {
+        const data = (await response.json()) as { taskId: string }
+        await fetchTaskStatus(mode, data.taskId, { scheduleNext: !document.hidden })
         return
       }
 
-      if (!res.ok) {
-        const data = await res.json() as { message?: string }
-        setError(data.message ?? '启动失败')
-        setStatusWithRef('error')
+      if (!response.ok) {
+        const data = (await response.json()) as { message?: string }
+        updateModeState(mode, (state) => ({
+          ...state,
+          status: 'error',
+          error: data.message ?? '启动失败',
+          pollBlocked: false,
+        }))
         return
       }
 
-      const data = await res.json() as { taskId: string }
-      setSelectedVer(data.taskId)
-      streamVersion(data.taskId, true)  // refresh version list on completion
+      const data = (await response.json()) as { taskId: string; version: number }
 
-      // Add optimistic version entry (replaced on 'done' when loadVersions fires)
-      setVersions(prev => {
-        if (prev.some(v => v.id === data.taskId)) return prev
-        return [{
-          id:           data.taskId,
-          version:      (prev[0]?.version ?? 0) + 1,
-          status:       'running',
-          created_at:   new Date().toISOString(),
-          completed_at: null,
-        }, ...prev]
-      })
+      updateModeState(mode, (state) => ({
+        ...state,
+        selectedTaskId: data.taskId,
+        versions: mergeVersion(state.versions, {
+          taskId: data.taskId,
+          status: 'running',
+          result: '',
+          version: data.version,
+          createdAt: new Date().toISOString(),
+          completedAt: null,
+          error: null,
+          meta: null,
+        }),
+      }))
+
+      await fetchTaskStatus(mode, data.taskId, { scheduleNext: !document.hidden })
     } catch {
-      setError('请求失败，请重试')
-      setStatusWithRef('error')
+      updateModeState(mode, (state) => ({
+        ...state,
+        status: 'error',
+        error: '请求失败，请稍后重试。',
+      }))
     }
   }
 
-  function switchToVersion(ver: Version) {
-    if (ver.id === selectedVer) return
-    setSelectedVer(ver.id)
-    streamVersion(ver.id, false)  // viewing existing version, no list refresh needed
+  const selectVersion = async (version: Version) => {
+    stopPolling()
+    pollFailureCountRef.current = 0
+
+    updateModeState(mode, (state) => ({
+      ...state,
+      selectedTaskId: version.taskId,
+      status: version.status === 'running' ? 'loading' : state.status,
+      error: '',
+      pollBlocked: false,
+    }))
+
+    await fetchTaskStatus(mode, version.taskId, {
+      scheduleNext: version.status === 'running' && !document.hidden,
+    })
   }
 
-  const isGenerating = status === 'loading' || status === 'streaming'
-
-  // 查询分块进度
   useEffect(() => {
-    if (mode !== 'translate' || !selectedVer) {
-      setChunks([])
-      return
-    }
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let cancelled = false
+    fetch(`/api/documents/${id}`)
+      .then((response) => response.json())
+      .then((data: { title?: string }) => setDocTitle(data.title ?? ''))
+      .catch(() => {})
+  }, [id])
 
-    async function fetchChunks() {
-      if (cancelled) return
-      try {
-        const res = await fetch(`/api/smart/chunks/${selectedVer}`)
-        if (!cancelled && res.ok) {
-          const data = await res.json() as { chunks: Chunk[] }
-          setChunks(prev => {
-            // Avoid re-render if data hasn't changed
-            const prevSig = prev.map(c => c.status).join(',')
-            const nextSig = data.chunks.map((c: Chunk) => c.status).join(',')
-            return prevSig === nextSig && prev.length === data.chunks.length ? prev : data.chunks
-          })
-          // Stop polling once all chunks are settled
-          const allDone = data.chunks.length > 0 &&
-            data.chunks.every((c: Chunk) => c.status === 'done' || c.status === 'error')
-          if (!cancelled && !allDone &&
-              (statusRef.current === 'loading' || statusRef.current === 'streaming')) {
-            timer = setTimeout(fetchChunks, 2000)
-          }
-          return
-        }
-      } catch { /* ignore */ }
-      if (!cancelled && (statusRef.current === 'loading' || statusRef.current === 'streaming')) {
-        timer = setTimeout(fetchChunks, 2000)
+  useEffect(() => {
+    stopPolling()
+    pollFailureCountRef.current = 0
+    void loadVersions(mode)
+
+    return () => {
+      stopPolling()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, id])
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling()
+        return
+      }
+
+      const activeState = statesRef.current[modeRef.current]
+      if (
+        activeState.selectedTaskId &&
+        !activeState.pollBlocked &&
+        (activeState.status === 'running' || activeState.status === 'loading')
+      ) {
+        void fetchTaskStatus(modeRef.current, activeState.selectedTaskId, { scheduleNext: true })
       }
     }
-    fetchChunks()
-    return () => {
-      cancelled = true
-      clearTimeout(timer)
-    }
-  }, [mode, selectedVer])
+
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
+
+  const activeState = modeStates[mode]
+  const progressText = getProgressText(activeState.meta, activeState.status)
+  const isRunning = activeState.status === 'loading' || activeState.status === 'running'
 
   return (
     <div className="min-h-screen">
-      {/* Sticky header */}
-      <header className="sticky top-0 z-40 border-b bg-[#fafaf8]/80 dark:bg-[#1a1a1a]/80 backdrop-blur-sm">
-        <div className="max-w-2xl mx-auto px-4 h-12 flex items-center justify-between gap-3">
+      <header className="sticky top-0 z-40 border-b bg-[#fafaf8]/80 backdrop-blur-sm dark:bg-[#1a1a1a]/80">
+        <div className="mx-auto flex h-12 max-w-2xl items-center justify-between gap-3 px-4">
           <Link
             href={`/${id}`}
-            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            className="flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
-            <ArrowLeft className="w-4 h-4" />
-            <span className="truncate max-w-[160px] sm:max-w-xs">{docTitle || '原文'}</span>
+            <ArrowLeft className="h-4 w-4" />
+            <span className="max-w-[160px] truncate sm:max-w-xs">{docTitle || '原文'}</span>
           </Link>
-          <span className="text-xs font-medium text-muted-foreground shrink-0">智读</span>
+          <span className="shrink-0 text-xs font-medium text-muted-foreground">智读</span>
         </div>
       </header>
 
-      {/* Mode tabs */}
-      <div className="sticky top-12 z-30 border-b bg-[#fafaf8]/90 dark:bg-[#1a1a1a]/90 backdrop-blur-sm">
-        <div className="max-w-2xl mx-auto px-4">
+      <div className="sticky top-12 z-30 border-b bg-[#fafaf8]/90 backdrop-blur-sm dark:bg-[#1a1a1a]/90">
+        <div className="mx-auto max-w-2xl px-4">
           <div className="flex">
-            {MODES.map(m => (
+            {MODES.map((entry) => (
               <button
-                key={m.key}
-                onClick={() => !isGenerating && setMode(m.key)}
-                disabled={isGenerating}
-                className={`flex-1 py-3 text-sm font-medium transition-colors border-b-2 ${
-                  mode === m.key
-                    ? 'border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100'
+                key={entry.key}
+                onClick={() => setMode(entry.key)}
+                className={`flex-1 border-b-2 py-3 text-sm font-medium transition-colors ${
+                  mode === entry.key
+                    ? 'border-zinc-900 text-zinc-900 dark:border-zinc-100 dark:text-zinc-100'
                     : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}
               >
-                {m.emoji} {m.label}
+                {entry.emoji} {entry.label}
               </button>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Top progress bar */}
-      {isGenerating && (
-        <div className="fixed top-0 left-0 right-0 z-50 h-0.5 bg-zinc-200 dark:bg-zinc-800">
-          <div className="h-full bg-blue-500 animate-pulse" style={{ width: '60%' }} />
+      {isRunning && (
+        <div className="fixed left-0 right-0 top-0 z-50 h-0.5 bg-zinc-200 dark:bg-zinc-800">
+          <div className="h-full w-3/5 animate-pulse bg-blue-500" />
         </div>
       )}
 
-      {/* Version chips + refresh button */}
-      <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-2 flex-wrap">
+      <div className="mx-auto flex max-w-2xl flex-wrap items-center gap-2 px-4 py-3">
         <Button
           variant="ghost"
           size="sm"
           onClick={startNewTask}
-          disabled={isGenerating}
-          className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground"
+          disabled={isRunning}
+          className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
-          {versions.length === 0 ? '开始生成' : '重新生成'}
+          <RefreshCw className={`h-3.5 w-3.5 ${isRunning ? 'animate-spin' : ''}`} />
+          {activeState.versions.length === 0 ? '开始生成' : '重新生成'}
         </Button>
 
-        {versions.slice(0, 5).map(ver => (
+        {activeState.versions.map((version) => (
           <button
-            key={ver.id}
-            onClick={() => switchToVersion(ver)}
-            className={`h-7 px-2.5 rounded-full text-xs transition-colors ${
-              selectedVer === ver.id
-                ? 'bg-zinc-900 dark:bg-zinc-100 text-zinc-100 dark:text-zinc-900'
-                : 'bg-zinc-100 dark:bg-zinc-800 text-muted-foreground hover:text-foreground'
+            key={version.taskId}
+            onClick={() => void selectVersion(version)}
+            title={formatVersionTime(version.createdAt)}
+            className={`h-7 rounded-full px-2.5 text-xs transition-colors ${
+              activeState.selectedTaskId === version.taskId
+                ? 'bg-zinc-900 text-zinc-100 dark:bg-zinc-100 dark:text-zinc-900'
+                : 'bg-zinc-100 text-muted-foreground hover:text-foreground dark:bg-zinc-800'
             }`}
           >
-            {formatVersionTime(ver.created_at)}
+            {`v${version.version}`}
           </button>
         ))}
       </div>
 
-      {/* Main content area */}
-      <article className="max-w-2xl mx-auto px-5 pb-24 sm:pb-12">
-        {status === 'empty' && !isGenerating && (
+      <article className="mx-auto max-w-2xl px-5 pb-24 sm:pb-12">
+        {activeState.status === 'empty' && (
           <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
-            <span className="text-4xl mb-4">
-              {MODES.find(m => m.key === mode)?.emoji}
-            </span>
-            <p className="text-sm mb-4">点击 ↺ 开始{MODE_LABELS[mode]}</p>
+            <span className="mb-4 text-4xl">{MODES.find((entry) => entry.key === mode)?.emoji}</span>
+            <p className="mb-2 text-sm">点击“开始生成”创建新的{MODE_LABELS[mode]}任务</p>
+            <p className="text-xs text-muted-foreground/80">结果会保存在历史版本里，可随时切换查看</p>
           </div>
         )}
 
-        {status === 'loading' && !content && (
+        {activeState.error && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-400">
+            {activeState.error}
+          </div>
+        )}
+
+        {(activeState.status === 'loading' || activeState.status === 'running') && !activeState.content && (
           <div className="space-y-3 py-4">
             <Skeleton className="h-5 w-3/4" />
             <Skeleton className="h-5 w-full" />
             <Skeleton className="h-5 w-5/6" />
             <Skeleton className="h-5 w-full" />
             <Skeleton className="h-5 w-2/3" />
+            {progressText && <p className="pt-2 text-sm text-muted-foreground">{progressText}</p>}
           </div>
         )}
 
-        {(status === 'streaming' || status === 'done') && content && (
-          <div className="py-4 reading-body">
-            <MarkdownRenderer content={content} />
-            {status === 'streaming' && (
-              <span className="inline-block w-0.5 h-4 bg-zinc-600 animate-pulse ml-0.5 align-middle" />
-            )}
-          </div>
-        )}
-
-        {status === 'error' && (
-          <div className="py-8 flex flex-col items-center gap-4">
-            <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 px-6 py-4 text-sm text-red-700 dark:text-red-400 max-w-sm text-center">
-              {error || '生成失败，请重试'}
+        {activeState.content && (
+          <div className="py-4">
+            <div className="mb-3 flex items-center justify-between text-xs text-muted-foreground">
+              <span>
+                {activeState.selectedTaskId
+                  ? `当前版本 ${
+                      activeState.versions.find((version) => version.taskId === activeState.selectedTaskId)?.version ?? '-'
+                    }`
+                  : ''}
+              </span>
+              {progressText && <span>{progressText}</span>}
             </div>
-            <Button variant="outline" size="sm" onClick={startNewTask}>
-              重新生成
-            </Button>
-          </div>
-        )}
 
-        {/* 分块进度，仅翻译模式显示 */}
-        {mode === 'translate' && chunks.length > 0 && (
-          <div className="mb-4 space-y-1">
-            {chunks.map((c, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs">
-                <span className="w-12 text-right text-muted-foreground">{c.type}</span>
-                <span className="flex-1 truncate">{c.content.slice(0, 32)}{c.content.length > 32 ? '…' : ''}</span>
-                <span className={
-                  c.status === 'done' ? 'text-green-600 dark:text-green-400' :
-                  c.status === 'error' ? 'text-red-600 dark:text-red-400' :
-                  'text-yellow-600 dark:text-yellow-400'
-                }>
-                  {c.status === 'done' ? '✔️' : c.status === 'error' ? '❌' : '…'}
-                </span>
+            <div className="reading-body">
+              <MarkdownRenderer content={activeState.content} />
+            </div>
+
+            {isRunning && (
+              <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+                <span>轮询更新中...</span>
               </div>
-            ))}
+            )}
           </div>
         )}
       </article>
 
-      {/* Mobile bottom nav — z-50 to cover layout's nav */}
-      <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-50 border-t bg-[#fafaf8] dark:bg-[#1a1a1a]">
-        <div className="flex items-center justify-around h-14">
-          <Link href="/" className="flex flex-col items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t bg-[#fafaf8] dark:bg-[#1a1a1a] sm:hidden">
+        <div className="flex h-14 items-center justify-around">
+          <Link
+            href="/"
+            className="flex flex-col items-center gap-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
             <span className="text-lg">📚</span>
             <span>文库</span>
           </Link>
-          <Link href={`/${id}`} className="flex flex-col items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
-            <BookOpen className="w-5 h-5" />
+          <Link
+            href={`/${id}`}
+            className="flex flex-col items-center gap-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <BookOpen className="h-5 w-5" />
             <span>原文</span>
           </Link>
           <Link href={`/${id}/smart`} className="flex flex-col items-center gap-0.5 text-xs text-foreground transition-colors">

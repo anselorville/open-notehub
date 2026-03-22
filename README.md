@@ -61,6 +61,20 @@ npm run db:migrate
 npm run dev
 ```
 
+## Browser Validation
+
+Use the repo-local virtual environment for `browser-use` instead of a global install.
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\browser-use.exe doctor
+```
+
+```cmd
+.\.venv\Scripts\activate.bat
+.\.venv\Scripts\browser-use.exe doctor
+```
+
 ## Vercel Deployment
 
 1. Create a [Turso](https://turso.tech) database

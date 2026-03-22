@@ -1,88 +1,121 @@
 // lib/llm/processors/translate.ts
-// Chunked parallel translation. Processes up to 3 chunks concurrently.
-// Emits chunks in strict document order using emittedUpTo tracking.
+// Chunked translation with ordered DB flushes for polling-based progress.
 
-import { db } from '@/lib/db/client'
-import { sql } from 'drizzle-orm'
 import { splitIntoChunks, pLimit } from '../chunker'
 import { chatOnce } from '../client'
 import { TRANSLATE_CHUNK_SYSTEM } from '../prompts'
-import { TaskContext, emitChunk } from '../task-registry'
+import {
+  completeSmartResult,
+  failSmartResult,
+  setSmartProgress,
+  toErrorCode,
+  withTimeoutSignal,
+} from './shared'
 
 const CHUNK_SIZE = 1500
 const CONCURRENCY = 3
 
 interface TranslateOptions {
-  ctx:        TaskContext
-  content:    string
+  content: string
   targetLang: string
-  resultId:   string
+  resultId: string
 }
 
-async function translateChunk(chunk: string, targetLang: string, retries = 1): Promise<string> {
+interface ChunkOutcome {
+  text: string
+  failed: boolean
+}
+
+async function translateChunk(
+  chunk: string,
+  targetLang: string,
+  retries = 2
+): Promise<ChunkOutcome> {
   const messages = [
     { role: 'system' as const, content: TRANSLATE_CHUNK_SYSTEM(targetLang) },
-    { role: 'user'   as const, content: chunk },
+    { role: 'user' as const, content: chunk },
   ]
+
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const result = await chatOnce({ messages, maxTokens: 3000 })
-      return result.content
+      const result = await chatOnce({
+        messages,
+        maxTokens: 3000,
+        signal: withTimeoutSignal(),
+      })
+      return { text: result.content.trim(), failed: false }
     } catch (err) {
       if (attempt === retries) throw err
     }
   }
-  return '' // unreachable
-}
 
-async function flushResult(resultId: string, text: string): Promise<void> {
-  await db.run(sql`
-    UPDATE smart_results SET result = ${text} WHERE id = ${resultId}
-  `)
+  return { text: '', failed: true }
 }
 
 export async function runTranslate(opts: TranslateOptions): Promise<void> {
-  const { ctx, content, targetLang, resultId } = opts
+  const { content, targetLang, resultId } = opts
 
   const chunks = splitIntoChunks(content, CHUNK_SIZE)
   const results: string[] = new Array(chunks.length).fill('')
   const done: boolean[] = new Array(chunks.length).fill(false)
-  const failedChunks: number[] = []
-  let emittedUpTo = 0  // index of next chunk to emit
-  const flushPromises: Promise<void>[] = []  // track all DB writes
+  let emittedUpTo = 0
+  let successfulChunks = 0
+  let currentResult = ''
+  let flushQueue: Promise<void> = Promise.resolve()
+
+  if (chunks.length === 0) {
+    await failSmartResult(resultId, 'no_content')
+    return
+  }
+
+  const flushReadyChunks = async () => {
+    while (emittedUpTo < chunks.length && done[emittedUpTo]) {
+      currentResult = currentResult
+        ? `${currentResult}\n\n${results[emittedUpTo]}`
+        : results[emittedUpTo]
+
+      emittedUpTo += 1
+
+      await setSmartProgress(resultId, currentResult, {
+        totalChunks: chunks.length,
+        completedChunks: emittedUpTo,
+        phase: 'translate',
+      })
+    }
+  }
 
   const tasks = chunks.map((chunk, i) => async () => {
     try {
-      results[i] = await translateChunk(chunk, targetLang, 1)
-    } catch {
-      failedChunks.push(i)
-      results[i] = `\n\n> ⚠️ 此段翻译失败\n\n`
+      const translated = await translateChunk(chunk, targetLang)
+      if (translated.failed || !translated.text) {
+        throw new Error('empty_translation')
+      }
+      results[i] = translated.text
+      successfulChunks += 1
+    } catch (error) {
+      const code = toErrorCode(error)
+      results[i] = `> Translation failed for this chunk (${code}); falling back to source text.\n\n${chunk}`
     }
-    done[i] = true
 
-    // Flush all contiguous done chunks from emittedUpTo onward (in order)
-    while (emittedUpTo < chunks.length && done[emittedUpTo]) {
-      const toEmit = results[emittedUpTo] + (emittedUpTo < chunks.length - 1 ? '\n\n' : '')
-      emitChunk(ctx, toEmit)
-      flushPromises.push(flushResult(resultId, ctx.accumulated))
-      emittedUpTo++
-    }
+    done[i] = true
+    flushQueue = flushQueue.then(flushReadyChunks)
   })
 
   await pLimit(tasks, CONCURRENCY)
-  // Wait for all flushes to complete before marking done
-  await Promise.all(flushPromises)
+  await flushQueue
 
-  // Update meta
-  const meta = JSON.stringify({
-    target_lang: targetLang,
-    chunks_total: chunks.length,
-    chunks_completed: chunks.length - failedChunks.length,
-    failed_chunks: failedChunks,
-  })
-  await db.run(sql`
-    UPDATE smart_results
-    SET status = 'done', completed_at = unixepoch(), meta = ${meta}
-    WHERE id = ${resultId}
-  `)
+  const meta = {
+    totalChunks: chunks.length,
+    completedChunks: chunks.length,
+    successfulChunks,
+    phase: 'translate',
+    targetLang,
+  }
+
+  if (successfulChunks === 0) {
+    await failSmartResult(resultId, 'translate_all_chunks_failed', currentResult, meta)
+    return
+  }
+
+  await completeSmartResult(resultId, currentResult, meta)
 }

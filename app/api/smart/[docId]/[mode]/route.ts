@@ -5,23 +5,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
 import { sql } from 'drizzle-orm'
-import { launchTask, SmartMode, recoverStaleTasks } from '@/lib/llm/dispatcher'
+import { launchTask, SmartMode, recoverStaleTasksOnce } from '@/lib/llm/dispatcher'
 
 const VALID_MODES: SmartMode[] = ['translate', 'summarize', 'brainstorm']
-
-// Run once on cold start (module-level flag)
-let recovered = false
-async function ensureRecovered() {
-  if (!recovered) {
-    recovered = true
-    await recoverStaleTasks()
-  }
-}
 
 interface Params { docId: string; mode: string }
 
 export async function POST(req: NextRequest, { params }: { params: Params }) {
-  await ensureRecovered()
+  await recoverStaleTasksOnce()
 
   const { docId, mode } = params
 
@@ -54,8 +45,8 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
   } catch { /* no body */ }
 
   try {
-    const { taskId } = await launchTask(docId, mode as SmartMode, options)
-    return NextResponse.json({ taskId }, { status: 201 })
+    const { taskId, version } = await launchTask(docId, mode as SmartMode, options)
+    return NextResponse.json({ taskId, version }, { status: 201 })
   } catch (err) {
     if (err instanceof Error) {
       const status = (err as Error & { status?: number }).status
@@ -72,6 +63,8 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Params }) {
+  await recoverStaleTasksOnce()
+
   const { docId, mode } = params
 
   if (!VALID_MODES.includes(mode as SmartMode)) {
@@ -91,11 +84,11 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
       id: string; version: number; status: string
       created_at: number; completed_at: number | null
     }>).map(r => ({
-      id:           r.id,
-      version:      r.version,
-      status:       r.status,
-      created_at:   new Date(r.created_at * 1000).toISOString(),
-      completed_at: r.completed_at ? new Date(r.completed_at * 1000).toISOString() : null,
+      taskId:      r.id,
+      version:     r.version,
+      status:      r.status,
+      createdAt:   new Date(r.created_at * 1000).toISOString(),
+      completedAt: r.completed_at ? new Date(r.completed_at * 1000).toISOString() : null,
     }))
 
     return NextResponse.json({ versions })
