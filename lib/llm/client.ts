@@ -46,6 +46,17 @@ interface ChatOnceResult {
   model?: string
 }
 
+interface ChatCompletionResponse {
+  choices?: Array<{
+    finish_reason?: string | null
+    message?: {
+      content?: string | null
+      reasoning_content?: string | null
+      tool_calls?: ToolCall[]
+    }
+  }>
+}
+
 export class LlmApiError extends Error {
   status: number
   body: string
@@ -146,6 +157,17 @@ async function openChatCompletion(
   throw new Error('LLM request failed before receiving a response')
 }
 
+function hasUsableChatOncePayload(data: ChatCompletionResponse): boolean {
+  const choice = data.choices?.[0]
+  const content = choice?.message?.content
+  const toolCalls = choice?.message?.tool_calls
+
+  return Boolean(
+    (typeof content === 'string' && content.trim().length > 0) ||
+    (Array.isArray(toolCalls) && toolCalls.length > 0)
+  )
+}
+
 /**
  * Stream a chat completion. Calls onDelta for each text chunk.
  * Calls onToolCalls if the model returns tool calls (non-streaming fallback).
@@ -236,13 +258,64 @@ export async function chatOnce(opts: ChatOnceOptions): Promise<ChatOnceResult> {
   }
   if (tools?.length) body.tools = tools
 
-  const { response, model } = await openChatCompletion(body, signal)
+  const { baseUrl, apiKey, model, fallbacks } = getConfig()
+  const candidates = getCandidateModels(model, fallbacks, baseUrl)
+  const failures: LlmApiError[] = []
 
-  const data = await response.json()
-  const choice = data.choices?.[0]
-  return {
-    content:   choice?.message?.content ?? '',
-    toolCalls: choice?.message?.tool_calls,
-    model,
+  for (const candidate of candidates) {
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ ...body, model: candidate }),
+      signal,
+    })
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      failures.push(new LlmApiError(
+        `LLM API error for model ${candidate}: ${res.status} ${text.slice(0, 200)}`,
+        {
+          status: res.status,
+          body: text,
+          model: candidate,
+          providerCode: parseProviderCode(text),
+        }
+      ))
+      continue
+    }
+
+    const data = await res.json() as ChatCompletionResponse
+    if (!hasUsableChatOncePayload(data)) {
+      const choice = data.choices?.[0]
+      const bodyText = JSON.stringify({
+        finish_reason: choice?.finish_reason,
+        content: choice?.message?.content ?? null,
+        reasoning_content: choice?.message?.reasoning_content?.slice(0, 200) ?? null,
+      })
+      failures.push(new LlmApiError(
+        `LLM completion was empty for model ${candidate}`,
+        {
+          status: 502,
+          body: bodyText,
+          model: candidate,
+        }
+      ))
+      continue
+    }
+
+    cachedAccessibleModel = candidate
+    const choice = data.choices?.[0]
+    return {
+      content: choice?.message?.content ?? '',
+      toolCalls: choice?.message?.tool_calls,
+      model: candidate,
+    }
   }
+
+  const last = failures[failures.length - 1]
+  if (last) throw last
+  throw new Error('LLM request failed before receiving a usable response')
 }

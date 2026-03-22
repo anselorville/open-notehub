@@ -1,26 +1,27 @@
+import { Suspense, cache } from 'react'
+import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { db, schema } from '@/lib/db/client'
+import { Sparkles } from 'lucide-react'
 import { eq, sql } from 'drizzle-orm'
-import { MarkdownRenderer } from '@/components/MarkdownRenderer'
+import { db, schema } from '@/lib/db/client'
+import { DeferredServerMarkdownRenderer } from '@/components/DeferredServerMarkdownRenderer'
 import { ReadingProgress } from '@/components/ReadingProgress'
 import { Badge } from '@/components/ui/badge'
 import { formatDate } from '@/lib/utils'
-import Link from 'next/link'
-import { Sparkles } from 'lucide-react'
 
 interface Params {
   id: string
 }
 
-async function getDocument(id: string) {
-  const doc = await db.query.documents.findFirst({
+const getDocumentRecord = cache(async (id: string) => {
+  return db.query.documents.findFirst({
     where: eq(schema.documents.id, id),
   })
-  if (!doc) return null
+})
 
-  // Async read_count increment — fire and forget
-  db.run(sql`UPDATE documents SET read_count = read_count + 1 WHERE id = ${id}`)
-    .catch(err => console.error('[read_count]', err))
+async function getDocument(id: string) {
+  const doc = await getDocumentRecord(id)
+  if (!doc) return null
 
   return {
     ...doc,
@@ -31,16 +32,34 @@ async function getDocument(id: string) {
   }
 }
 
+function incrementReadCount(id: string) {
+  void db.run(sql`UPDATE documents SET read_count = read_count + 1 WHERE id = ${id}`)
+    .catch(err => console.error('[read_count]', err))
+}
+
+function ArticleBodyFallback() {
+  return (
+    <div className="space-y-4">
+      <div className="h-6 w-3/4 rounded bg-zinc-200/80 dark:bg-zinc-800/80" />
+      <div className="h-4 w-full rounded bg-zinc-200/70 dark:bg-zinc-800/70" />
+      <div className="h-4 w-11/12 rounded bg-zinc-200/70 dark:bg-zinc-800/70" />
+      <div className="h-4 w-5/6 rounded bg-zinc-200/70 dark:bg-zinc-800/70" />
+      <div className="h-40 rounded-xl bg-zinc-200/60 dark:bg-zinc-800/60" />
+    </div>
+  )
+}
+
 export default async function ReadingPage({ params }: { params: Params }) {
   const doc = await getDocument(params.id)
   if (!doc) notFound()
+
+  incrementReadCount(params.id)
 
   return (
     <>
       <ReadingProgress />
 
       <article className="max-w-2xl mx-auto px-5 py-8 pb-24 sm:pb-12 reading-body">
-        {/* Back link */}
         <Link
           href="/"
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-8 no-underline transition-colors"
@@ -48,7 +67,6 @@ export default async function ReadingPage({ params }: { params: Params }) {
           ← 返回文库
         </Link>
 
-        {/* Article header */}
         <header className="mb-8">
           <h1 className="text-2xl font-bold leading-tight mb-4 text-zinc-900 dark:text-zinc-100 font-sans">
             {doc.title}
@@ -85,7 +103,6 @@ export default async function ReadingPage({ params }: { params: Params }) {
             </div>
           )}
 
-          {/* 智读 button */}
           <div className="flex gap-2 mt-4">
             <Link
               href={`/${doc.id}/smart`}
@@ -101,10 +118,10 @@ export default async function ReadingPage({ params }: { params: Params }) {
 
         <hr className="border-zinc-200 dark:border-zinc-700 mb-8" />
 
-        {/* Article body */}
-        <MarkdownRenderer content={doc.content} />
+        <Suspense fallback={<ArticleBodyFallback />}>
+          <DeferredServerMarkdownRenderer content={doc.content} />
+        </Suspense>
 
-        {/* Footer */}
         <footer className="mt-12 pt-6 border-t border-zinc-200 dark:border-zinc-700">
           <Link
             href="/"
@@ -119,10 +136,8 @@ export default async function ReadingPage({ params }: { params: Params }) {
 }
 
 export async function generateMetadata({ params }: { params: Params }) {
-  const doc = await db.query.documents.findFirst({
-    where: eq(schema.documents.id, params.id),
-  })
+  const doc = await getDocumentRecord(params.id)
   return {
-    title: doc ? `${doc.title} — LearnHub` : 'Not Found',
+    title: doc ? `${doc.title} · LearnHub` : 'Not Found',
   }
 }

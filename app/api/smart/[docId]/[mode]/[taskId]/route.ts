@@ -58,3 +58,44 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
     return NextResponse.json({ error: 'internal_error', message: 'Failed to fetch task status' }, { status: 500 })
   }
 }
+
+export async function DELETE(_req: NextRequest, { params }: { params: Params }) {
+  await recoverStaleTasksOnce()
+
+  const { docId, mode, taskId } = params
+
+  if (!VALID_MODES.includes(mode as SmartMode)) {
+    return NextResponse.json({ error: 'invalid_mode', message: 'Invalid mode' }, { status: 400 })
+  }
+
+  try {
+    const row = await db.run(sql`
+      SELECT status
+      FROM smart_results
+      WHERE id = ${taskId} AND document_id = ${docId} AND mode = ${mode}
+      LIMIT 1
+    `)
+
+    if (!row.rows.length) {
+      return NextResponse.json({ error: 'task_not_found', message: 'Task not found' }, { status: 404 })
+    }
+
+    const status = String((row.rows[0] as unknown as { status: string }).status)
+    if (status === 'running') {
+      return NextResponse.json(
+        { error: 'task_running', message: 'Running versions cannot be deleted' },
+        { status: 409 }
+      )
+    }
+
+    await db.run(sql`
+      DELETE FROM smart_results
+      WHERE id = ${taskId} AND document_id = ${docId} AND mode = ${mode}
+    `)
+
+    return new NextResponse(null, { status: 204 })
+  } catch (error) {
+    console.error('[DELETE /api/smart/task]', error)
+    return NextResponse.json({ error: 'internal_error', message: 'Failed to delete task' }, { status: 500 })
+  }
+}

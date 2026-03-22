@@ -7,7 +7,11 @@ import { SUMMARIZE_MAP_SYSTEM, SUMMARIZE_REDUCE_SYSTEM } from '../prompts'
 import { completeSmartResult, failSmartResult, setSmartProgress, toErrorCode, withTimeoutSignal } from './shared'
 
 const CHUNK_SIZE = 1500
-const MAP_CONCURRENCY = 5
+const MAP_CONCURRENCY = 3
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 /**
  * Summarize a single chunk (map phase). Returns plain text summary.
@@ -26,6 +30,7 @@ async function mapChunk(chunk: string, retries = 2): Promise<string> {
       return result.content
     } catch (err) {
       if (attempt === retries) throw err
+      await wait(600 * (attempt + 1))
     }
   }
   return ''
@@ -78,6 +83,7 @@ export async function runSummarize(opts: SummarizeOptions): Promise<void> {
   let settledChunks = 0
   let failedChunks = 0
   let latestProgress = ''
+  let firstMapErrorCode: string | null = null
   let flushQueue: Promise<void> = Promise.resolve()
 
   const mapTasks = chunks.map((chunk, i) => async () => {
@@ -86,8 +92,11 @@ export async function runSummarize(opts: SummarizeOptions): Promise<void> {
       if (!summary.trim()) throw new Error('empty_map_summary')
       chunkSummaries[i] = summary.trim()
       progressEntries.push(`### Chunk ${i + 1}\n${summary.trim()}`)
-    } catch {
+    } catch (error) {
       failedChunks += 1
+      if (!firstMapErrorCode) {
+        firstMapErrorCode = toErrorCode(error)
+      }
       chunkSummaries[i] = ''
     } finally {
       settledChunks += 1
@@ -109,6 +118,8 @@ export async function runSummarize(opts: SummarizeOptions): Promise<void> {
     await failSmartResult(resultId, 'summarize_map_failed', latestProgress, {
       totalChunks: chunks.length,
       completedChunks: settledChunks,
+      failedChunks,
+      errorCode: firstMapErrorCode,
       phase: 'map',
     })
     return
