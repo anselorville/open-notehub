@@ -1,14 +1,14 @@
 ## 1. Identity and access foundation
 
-- [ ] 1.1 Replace the shared-password login path with real user-backed authentication and role-aware sessions
-- [ ] 1.2 Add a bootstrap-owner path so existing deployments can initialize the first admin safely
-- [ ] 1.3 Update middleware and server-side auth helpers to enforce owner/editor/admin access boundaries
+- [x] 1.1 Replace the shared-password login path with real user-backed authentication and role-aware sessions
+- [x] 1.2 Add a bootstrap-owner path so existing deployments can initialize the first admin safely
+- [x] 1.3 Update middleware and server-side auth helpers to enforce owner/editor/admin access boundaries
 
 ## 2. Admin shell and management surfaces
 
-- [ ] 2.1 Add an admin app shell and route structure for overview, documents, import center, agent/key management, and users
-- [ ] 2.2 Add user management and password reset flows for backstage operators
-- [ ] 2.3 Add document management, agent/key management, and overview metrics APIs/pages
+- [x] 2.1 Add an admin app shell and route structure for overview, documents, import center, agent/key management, and users
+- [x] 2.2 Add user management and password reset flows for backstage operators
+- [x] 2.3 Add document management, agent/key management, and overview metrics APIs/pages
 
 ## 3. Web-access module
 
@@ -25,6 +25,6 @@
 
 ## 5. Validation and rollout
 
-- [ ] 5.1 Validate owner bootstrap, user roles, and admin route protection
+- [x] 5.1 Validate owner bootstrap, user roles, and admin route protection
 - [ ] 5.2 Validate representative web-access URL samples and provider routing behavior
 - [ ] 5.3 Validate frontstage and backstage import flows, including retries and failed-job diagnostics

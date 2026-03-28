@@ -6,7 +6,8 @@ import { generateId, countWords } from '@/lib/utils'
 
 export async function POST(request: NextRequest) {
   // 1. Verify Agent API key
-  if (!verifyAgentKey(request.headers.get('authorization'))) {
+  const agent = await verifyAgentKey(request.headers.get('authorization'))
+  if (!agent) {
     return NextResponse.json(
       { error: 'unauthorized', message: 'Invalid or missing API key' },
       { status: 401 }
@@ -62,7 +63,7 @@ export async function POST(request: NextRequest) {
       sourceUrl: data.source_url ?? null,
       sourceType: data.source_type,
       tags: JSON.stringify(data.tags),
-      agentId: null,
+      agentId: agent.id,
       wordCount,
       createdAt: now,
       updatedAt: now,

@@ -9,6 +9,10 @@ export function generateId(): string {
   return globalThis.crypto.randomUUID()
 }
 
+export function generateAgentApiKey(): string {
+  return `onh_${globalThis.crypto.randomUUID().replace(/-/g, '')}`
+}
+
 export function formatDate(ts: Date | number | string): string {
   const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts)
   return d.toLocaleDateString('zh-CN', {

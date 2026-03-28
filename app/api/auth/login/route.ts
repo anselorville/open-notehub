@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
-import { LoginSchema } from '@/lib/schemas/document'
+import { LoginSchema } from '@/lib/schemas/auth'
 import { createSession, setSessionCookie } from '@/lib/auth'
-
-// Hash is computed once at startup for performance
-let passwordHash: string | null = null
-async function getPasswordHash(): Promise<string> {
-  if (!passwordHash) {
-    passwordHash = await bcrypt.hash(process.env.AUTH_PASSWORD!, 12)
-  }
-  return passwordHash
-}
+import {
+  findUserRecordByEmail,
+  hasOwnerAccount,
+  touchUserLogin,
+} from '@/lib/auth-server'
 
 export async function POST(request: NextRequest) {
   let body: unknown
@@ -32,8 +28,20 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const hash = await getPasswordHash()
-  const valid = await bcrypt.compare(result.data.password, hash)
+  if (!(await hasOwnerAccount())) {
+    return NextResponse.json(
+      {
+        error: 'bootstrap_required',
+        message: 'No owner account exists yet',
+      },
+      { status: 409 }
+    )
+  }
+
+  const user = await findUserRecordByEmail(result.data.email)
+  const valid = user
+    ? await bcrypt.compare(result.data.password, user.passwordHash)
+    : false
 
   if (!valid) {
     await new Promise(r => setTimeout(r, 200 + Math.random() * 100))
@@ -43,8 +51,30 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const token = await createSession()
-  const response = NextResponse.json({ ok: true })
+  if (!user || user.status === 'disabled') {
+    return NextResponse.json(
+      { error: 'forbidden', message: 'Account is disabled' },
+      { status: 403 }
+    )
+  }
+
+  await touchUserLogin(user.id)
+  const token = await createSession({
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    displayName: user.displayName,
+  })
+
+  const response = NextResponse.json({
+    ok: true,
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role === 'owner' ? 'owner' : 'editor',
+      displayName: user.displayName ?? null,
+    },
+  })
   await setSessionCookie(response, token)
   return response
 }

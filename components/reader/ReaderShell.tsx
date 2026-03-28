@@ -2,21 +2,33 @@
 
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { Library, Search } from 'lucide-react'
+import { Library, Search, Shield } from 'lucide-react'
 import { LibraryThemeProvider } from '@/components/library/LibraryThemeContext'
 import { LibraryThemeDrawer } from '@/components/library/LibraryThemeDrawer'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { cn } from '@/lib/utils'
 
-export function ReaderShell({ children }: { children: React.ReactNode }) {
+export function ReaderShell({
+  children,
+  showAdminEntry = false,
+}: {
+  children: React.ReactNode
+  showAdminEntry?: boolean
+}) {
   return (
     <LibraryThemeProvider>
-      <ReaderChrome>{children}</ReaderChrome>
+      <ReaderChrome showAdminEntry={showAdminEntry}>{children}</ReaderChrome>
     </LibraryThemeProvider>
   )
 }
 
-function ReaderChrome({ children }: { children: React.ReactNode }) {
+function ReaderChrome({
+  children,
+  showAdminEntry,
+}: {
+  children: React.ReactNode
+  showAdminEntry: boolean
+}) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const isLibraryHome = pathname === '/'
@@ -36,6 +48,15 @@ function ReaderChrome({ children }: { children: React.ReactNode }) {
           </Link>
 
           <div className="flex items-center gap-2">
+            {showAdminEntry && (
+              <Link
+                href="/admin"
+                className="hidden items-center gap-1 rounded-full border border-[#d9c7b1] px-3 py-1.5 text-xs font-medium text-[#5e4732] transition-colors hover:border-[#b6946c] hover:text-[#201710] dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-zinc-500 sm:flex"
+              >
+                <Shield className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>后台</span>
+              </Link>
+            )}
             {isLibraryHome && <LibraryThemeDrawer />}
             <ThemeToggle />
           </div>

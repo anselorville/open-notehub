@@ -1,29 +1,74 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSessionToken, verifySession } from '@/lib/auth'
 
+function isPublicRoute(pathname: string) {
+  return (
+    pathname === '/login' ||
+    pathname === '/bootstrap' ||
+    pathname === '/api/auth/login' ||
+    pathname === '/api/auth/logout' ||
+    pathname === '/api/auth/bootstrap' ||
+    pathname === '/api/auth/bootstrap/state' ||
+    pathname.startsWith('/api/v1') ||
+    pathname.startsWith('/api/health')
+  )
+}
+
+function isOwnerOnlyRoute(pathname: string) {
+  return (
+    pathname === '/admin/users' ||
+    pathname.startsWith('/admin/users/') ||
+    pathname === '/admin/agents' ||
+    pathname.startsWith('/admin/agents/') ||
+    pathname === '/api/admin/users' ||
+    pathname.startsWith('/api/admin/users/') ||
+    pathname === '/api/admin/agents' ||
+    pathname.startsWith('/api/admin/agents/')
+  )
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Public routes
-  if (pathname.startsWith('/login') || pathname.startsWith('/api/auth') || pathname.startsWith('/api/v1') || pathname.startsWith('/api/health')) {
+  if (isPublicRoute(pathname)) {
     return NextResponse.next()
   }
 
-  // Allow internal API with session (documents read API)
+  const session = await verifySession(getSessionToken(request))
+
+  if (pathname.startsWith('/admin')) {
+    if (!session) {
+      const loginUrl = new URL('/login', request.url)
+      loginUrl.searchParams.set('from', pathname)
+      return NextResponse.redirect(loginUrl)
+    }
+
+    if (isOwnerOnlyRoute(pathname) && session.role !== 'owner') {
+      return NextResponse.redirect(new URL('/admin', request.url))
+    }
+
+    return NextResponse.next()
+  }
+
   if (pathname.startsWith('/api/')) {
-    const token = getSessionToken(request)
-    if (!token || !(await verifySession(token))) {
+    if (!session) {
       return NextResponse.json(
         { error: 'unauthorized', message: 'Authentication required' },
         { status: 401 }
       )
     }
+
+    if (isOwnerOnlyRoute(pathname) && session.role !== 'owner') {
+      return NextResponse.json(
+        { error: 'forbidden', message: 'Insufficient permissions' },
+        { status: 403 }
+      )
+    }
+
     return NextResponse.next()
   }
 
-  // Protected reader routes
-  const token = getSessionToken(request)
-  if (!token || !(await verifySession(token))) {
+  if (!session) {
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('from', pathname)
     return NextResponse.redirect(loginUrl)

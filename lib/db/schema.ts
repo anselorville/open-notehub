@@ -10,9 +10,14 @@ import {
 export const users = sqliteTable('users', {
   id:           text('id').primaryKey(),
   email:        text('email').notNull().unique(),
+  displayName:  text('display_name'),
   passwordHash: text('password_hash').notNull(),
-  role:         text('role').notNull().default('user'),
+  role:         text('role').notNull().default('editor'),
+  status:       text('status').notNull().default('active'),
+  lastLoginAt:  integer('last_login_at', { mode: 'timestamp' }),
   createdAt:    integer('created_at', { mode: 'timestamp' }).notNull()
+                  .default(sql`(unixepoch())`),
+  updatedAt:    integer('updated_at', { mode: 'timestamp' }).notNull()
                   .default(sql`(unixepoch())`),
 })
 
@@ -48,6 +53,10 @@ export const documents = sqliteTable('documents', {
 
 export type Document = typeof documents.$inferSelect
 export type NewDocument = typeof documents.$inferInsert
+export type User = typeof users.$inferSelect
+export type NewUser = typeof users.$inferInsert
+export type Agent = typeof agents.$inferSelect
+export type NewAgent = typeof agents.$inferInsert
 
 export const smartResults = sqliteTable('smart_results', {
   id:          text('id').primaryKey(),

@@ -29,6 +29,13 @@
       "when": 1742515200000,
       "tag": "0003_smart_chunks",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1774710457664,
+      "tag": "0004_slow_champions",
+      "breakpoints": true
     }
   ]
 }

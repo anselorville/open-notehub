@@ -1,9 +1,16 @@
+import { redirect } from 'next/navigation'
 import { ReaderShell } from '@/components/reader/ReaderShell'
+import { getCurrentUser } from '@/lib/auth-server'
 
-export default function ReaderLayout({
+export default async function ReaderLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  return <ReaderShell>{children}</ReaderShell>
+  const user = await getCurrentUser()
+  if (!user) {
+    redirect('/login')
+  }
+
+  return <ReaderShell showAdminEntry>{children}</ReaderShell>
 }

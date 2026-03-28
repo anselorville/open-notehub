@@ -10,8 +10,4 @@ export const CreateDocumentSchema = z.object({
   agent_id:    z.string().max(64).default('default'),
 })
 
-export const LoginSchema = z.object({
-  password: z.string().min(1, 'Password is required'),
-})
-
 export type CreateDocumentInput = z.infer<typeof CreateDocumentSchema>
