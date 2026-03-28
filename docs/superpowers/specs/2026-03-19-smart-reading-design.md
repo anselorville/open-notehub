@@ -2,13 +2,13 @@
 
 **日期**: 2026-03-19
 **状态**: 已批准
-**范围**: LearnHub 智读（Smart Reading）功能模块
+**范围**: Open NoteHub 智读（Smart Reading）功能模块
 
 ---
 
 ## 一、背景与目标
 
-LearnHub 是一个以阅读体验为核心的个人知识阅读工具。用户通过 Agent 将文章推送进系统后，需要一种方式对文章进行深度理解，而不仅仅是阅读原文。
+Open NoteHub 是一个以阅读体验为核心的个人知识阅读工具。用户通过 Agent 将文章推送进系统后，需要一种方式对文章进行深度理解，而不仅仅是阅读原文。
 
 「智读」功能通过 LLM 提供三种能力：
 - **智能翻译**：将原文翻译为目标语言（默认中文）
@@ -360,7 +360,7 @@ ERROR → [用户点击重试] → LOADING
 
 ## 十二、API 响应格式规范
 
-遵循现有 LearnHub API 约定：
+遵循现有 Open NoteHub API 约定：
 
 ```typescript
 // POST /api/smart/[docId]/[mode]

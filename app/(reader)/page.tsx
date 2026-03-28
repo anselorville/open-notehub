@@ -1,19 +1,16 @@
-import { Suspense } from 'react'
 import { db } from '@/lib/db/client'
 import { sql } from 'drizzle-orm'
-import { DocumentCard } from '@/components/DocumentCard'
-import { TagFilter } from '@/components/TagFilter'
-import { Input } from '@/components/ui/input'
-import Link from 'next/link'
+import { LibraryHomeClient } from '@/components/library/LibraryHomeClient'
 
 interface SearchParams {
   q?: string
   tag?: string
   page?: string
+  focus?: string
 }
 
 async function getDocuments(params: SearchParams) {
-  const page  = Math.max(1, parseInt(params.page ?? '1'))
+  const page = Math.max(1, parseInt(params.page ?? '1'))
   const limit = 20
   const offset = (page - 1) * limit
   const { q, tag } = params
@@ -120,80 +117,5 @@ export default async function HomePage({
     getAllTags(),
   ])
 
-  const page = parseInt(searchParams.page ?? '1')
-
-  return (
-    <div className="max-w-2xl mx-auto px-4 py-6 pb-20 sm:pb-6">
-      {/* Search */}
-      <form method="GET" className="mb-4">
-        <Input
-          name="q"
-          defaultValue={searchParams.q}
-          placeholder="搜索文档…"
-          className="h-10"
-        />
-      </form>
-
-      {/* Tags */}
-      {tags.length > 0 && (
-        <div className="mb-6">
-          <Suspense>
-            <TagFilter tags={tags} selected={searchParams.tag} />
-          </Suspense>
-        </div>
-      )}
-
-      {/* Results count */}
-      <p className="text-sm text-muted-foreground mb-4">
-        共 {data.total} 篇文档
-        {searchParams.q && <span>，搜索&ldquo;{searchParams.q}&rdquo;</span>}
-      </p>
-
-      {/* Document cards */}
-      {data.items.length === 0 ? (
-        <div className="text-center py-16 text-muted-foreground">
-          <p className="text-4xl mb-3">📭</p>
-          <p className="text-sm">暂无文档</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {data.items.map(doc => (
-            <DocumentCard
-              key={doc.id}
-              id={doc.id}
-              title={doc.title}
-              summary={doc.summary}
-              tags={doc.tags}
-              sourceUrl={doc.source_url}
-              sourceType={doc.source_type}
-              wordCount={doc.word_count}
-              createdAt={doc.created_at}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Pagination */}
-      {(data.hasMore || page > 1) && (
-        <div className="mt-8 flex justify-center gap-4">
-          {page > 1 && (
-            <Link
-              href={`?page=${page - 1}${searchParams.q ? `&q=${searchParams.q}` : ''}${searchParams.tag ? `&tag=${searchParams.tag}` : ''}`}
-              className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-            >
-              ← 上一页
-            </Link>
-          )}
-          {data.hasMore && (
-            <Link
-              href={`?page=${page + 1}${searchParams.q ? `&q=${searchParams.q}` : ''}${searchParams.tag ? `&tag=${searchParams.tag}` : ''}`}
-              className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-            >
-              下一页 →
-            </Link>
-          )}
-        </div>
-      )}
-    </div>
-  )
+  return <LibraryHomeClient data={data} tags={tags} searchParams={searchParams} />
 }

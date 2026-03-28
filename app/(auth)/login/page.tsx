@@ -68,8 +68,8 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-[#fafaf8] dark:bg-[#1a1a1a]">
       <div className="w-full max-w-sm px-6">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-semibold tracking-tight">LearnHub</h1>
-          <p className="text-sm text-muted-foreground mt-1">知识阅读中心</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Open NoteHub</h1>
+          <p className="text-sm text-muted-foreground mt-1">开放式知识文库与 AI 阅读工作台</p>
         </div>
         <Suspense>
           <LoginForm />

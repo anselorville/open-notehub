@@ -1,6 +1,6 @@
-# LearnHub
+# Open NoteHub
 
-A mobile-first knowledge reading hub. Learning Agents push Markdown documents via HTTP API; you read them in a beautiful, Instapaper-style web UI.
+Open NoteHub is an open knowledge library and AI reading workspace. Agents can push Markdown documents via HTTP API, and you can search, read, and continue understanding them in a mobile-first web UI.
 
 ## Features
 
@@ -45,11 +45,11 @@ curl -X POST https://your-domain.com/api/v1/documents \
 
 | Variable | Description |
 |----------|-------------|
-| `DATABASE_URL` | SQLite: `file:./learnhub.db` or Turso: `libsql://...` |
+| `DATABASE_URL` | SQLite: `file:./open-notehub.db` or Turso: `libsql://...` |
 | `AUTH_PASSWORD` | Password for the reading interface |
 | `AUTH_SECRET` | JWT signing secret (32+ chars) |
 | `AGENT_API_KEY` | API key for agent document ingestion |
-| `NEXT_PUBLIC_SITE_TITLE` | Site title (optional, default: LearnHub) |
+| `NEXT_PUBLIC_SITE_TITLE` | Site title (optional, default: Open NoteHub) |
 
 ## Development
 

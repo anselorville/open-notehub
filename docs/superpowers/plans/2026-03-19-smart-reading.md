@@ -122,7 +122,7 @@ CMD ["sh", "-c", "DB=${DATABASE_URL#file:} && for f in lib/db/migrations/*.sql; 
 - [ ] **Step 1.5: Commit**
 
 ```bash
-cd /path/to/learnhub
+cd /path/to/open-notehub
 git add lib/db/migrations/0002_smart_results.sql lib/db/schema.ts lib/db/client.ts
 git commit -m "feat: add smart_results table migration and schema"
 ```
@@ -1934,10 +1934,10 @@ The existing CMD glob `lib/db/migrations/*.sql` will pick up `0002_smart_results
 - [ ] **Step 15.2: Rebuild and test**
 
 ```bash
-cd /path/to/learnhub
+cd /path/to/open-notehub
 docker compose build
 docker compose up -d
-docker logs -f --tail 50 learnhub
+docker logs -f --tail 50 open-notehub
 ```
 
 Expected logs:

@@ -29,7 +29,7 @@ if [[ -z "${AGENT_API_KEY:-}" ]]; then
   exit 1
 fi
 
-LEARNHUB_URL="${LEARNHUB_URL:-http://localhost:3000}"
+OPEN_NOTEHUB_URL="${OPEN_NOTEHUB_URL:-${LEARNHUB_URL:-http://localhost:3000}}"
 
 # 1. Fetch
 echo "📥 Fetching via Jina: $URL"
@@ -70,12 +70,12 @@ if [[ -n "$TAGS" ]]; then
 fi
 echo "🏷  Tags: ${TAGS:-none}"
 
-# 5. POST to LearnHub
-echo "🚀 Sending to $LEARNHUB_URL ..."
+# 5. POST to Open NoteHub
+echo "🚀 Sending to $OPEN_NOTEHUB_URL ..."
 
-HTTP_STATUS="$(curl -s -o /tmp/learnhub_response.json -w "%{http_code}" \
+HTTP_STATUS="$(curl -s -o /tmp/open-notehub_response.json -w "%{http_code}" \
   --max-time 15 \
-  -X POST "$LEARNHUB_URL/api/v1/documents" \
+  -X POST "$OPEN_NOTEHUB_URL/api/v1/documents" \
   -H "Authorization: Bearer $AGENT_API_KEY" \
   -H "Content-Type: application/json" \
   -d "$(jq -n \
@@ -87,12 +87,12 @@ HTTP_STATUS="$(curl -s -o /tmp/learnhub_response.json -w "%{http_code}" \
     '{title: $title, content: $content, source_url: $source_url, source_type: "blog", tags: $tags, summary: $summary}'
   )")"
 
-BODY="$(cat /tmp/learnhub_response.json)"
+BODY="$(cat /tmp/open-notehub_response.json)"
 
 if [[ "$HTTP_STATUS" == "200" || "$HTTP_STATUS" == "201" ]]; then
   DOC_ID="$(echo "$BODY" | jq -r '.id // empty')"
   echo "✅ Saved! ID: $DOC_ID"
-  echo "🔗 Read at: $LEARNHUB_URL/$DOC_ID"
+  echo "🔗 Read at: $OPEN_NOTEHUB_URL/$DOC_ID"
 else
   echo "❌ Failed (HTTP $HTTP_STATUS)"
   echo "   Response: $BODY"

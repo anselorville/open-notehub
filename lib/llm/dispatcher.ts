@@ -3,7 +3,7 @@
 
 import { db, schema } from '@/lib/db/client'
 import { eq, sql } from 'drizzle-orm'
-import { v4 as uuidv4 } from 'uuid'
+import { randomUUID } from 'node:crypto'
 import { runTranslate } from './processors/translate'
 import { runSummarize } from './processors/summarize'
 import { runBrainstorm } from './processors/brainstorm'
@@ -58,7 +58,7 @@ export async function launchTask(
     (versionRow.rows[0] as unknown as { next_version: number }).next_version
   )
 
-  const resultId = uuidv4()
+  const resultId = randomUUID()
   await db.run(sql`
     INSERT INTO smart_results (id, document_id, mode, version, status)
     VALUES (${resultId}, ${docId}, ${mode}, ${nextVersion}, 'running')

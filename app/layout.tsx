@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: process.env.NEXT_PUBLIC_SITE_TITLE ?? 'LearnHub',
-  description: 'Your personal knowledge reading hub',
+  title: process.env.NEXT_PUBLIC_SITE_TITLE ?? 'Open NoteHub',
+  description: 'Collect, search, and understand every article worth keeping.',
 }
 
 export default function RootLayout({
@@ -13,7 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
-      <body className="font-sans bg-[#fafaf8] dark:bg-[#1a1a1a] text-zinc-900 dark:text-zinc-100 antialiased">
+      <body className="bg-[#f7f1e7] text-zinc-900 antialiased dark:bg-[#151311] dark:text-zinc-100">
         {children}
       </body>
     </html>

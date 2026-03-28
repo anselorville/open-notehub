@@ -1,9 +1,10 @@
 import { createClient } from '@libsql/client'
 import { drizzle } from 'drizzle-orm/libsql'
 import * as schema from './schema'
+import { resolveDatabaseUrl } from './database-url'
 
 const client = createClient({
-  url: process.env.DATABASE_URL!,
+  url: resolveDatabaseUrl(),
   authToken: process.env.DATABASE_AUTH_TOKEN,
 })
 

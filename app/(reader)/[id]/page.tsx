@@ -68,7 +68,7 @@ export default async function ReadingPage({ params }: { params: Params }) {
         </Link>
 
         <header className="mb-8">
-          <h1 className="text-2xl font-bold leading-tight mb-4 text-zinc-900 dark:text-zinc-100 font-sans">
+          <h1 className="text-2xl font-bold leading-tight mb-4 text-zinc-900 dark:text-zinc-100">
             {doc.title}
           </h1>
 
@@ -138,6 +138,6 @@ export default async function ReadingPage({ params }: { params: Params }) {
 export async function generateMetadata({ params }: { params: Params }) {
   const doc = await getDocumentRecord(params.id)
   return {
-    title: doc ? `${doc.title} · LearnHub` : 'Not Found',
+    title: doc ? `${doc.title} · Open NoteHub` : 'Not Found',
   }
 }
