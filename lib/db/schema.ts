@@ -51,12 +51,82 @@ export const documents = sqliteTable('documents', {
   createdAtIdx: index('documents_created_at_idx').on(t.createdAt),
 }))
 
+export const documentSources = sqliteTable('document_sources', {
+  id:            text('id').primaryKey(),
+  documentId:    text('document_id').notNull().references(() => documents.id),
+  sourceUrl:     text('source_url').notNull(),
+  normalizedUrl: text('normalized_url'),
+  provider:      text('provider'),
+  sourceType:    text('source_type').notNull().default('web'),
+  metaJson:      text('meta_json'),
+  fetchedAt:     integer('fetched_at', { mode: 'timestamp' }),
+  createdAt:     integer('created_at', { mode: 'timestamp' }).notNull()
+                   .default(sql`(unixepoch())`),
+}, (t) => ({
+  documentIdx: index('document_sources_document_idx').on(t.documentId),
+  normalizedIdx: index('document_sources_normalized_url_idx').on(t.normalizedUrl),
+}))
+
+export const importJobs = sqliteTable('import_jobs', {
+  id:               text('id').primaryKey(),
+  submittedUrl:     text('submitted_url').notNull(),
+  normalizedUrl:    text('normalized_url'),
+  status:           text('status').notNull().default('queued'),
+  entryPoint:       text('entry_point').notNull().default('frontstage'),
+  sourceType:       text('source_type').notNull().default('web'),
+  preferredMode:    text('preferred_mode').notNull().default('auto'),
+  forcedProvider:   text('forced_provider'),
+  selectedProvider: text('selected_provider'),
+  submittedByUserId:text('submitted_by_user_id').references(() => users.id),
+  autoCreate:       integer('auto_create', { mode: 'boolean' }).notNull().default(true),
+  previewPayload:   text('preview_payload'),
+  trace:            text('trace'),
+  resultDocumentId: text('result_document_id').references(() => documents.id),
+  dedupeDocumentId: text('dedupe_document_id').references(() => documents.id),
+  errorCode:        text('error_code'),
+  errorMessage:     text('error_message'),
+  createdAt:        integer('created_at', { mode: 'timestamp' }).notNull()
+                      .default(sql`(unixepoch())`),
+  updatedAt:        integer('updated_at', { mode: 'timestamp' }).notNull()
+                      .default(sql`(unixepoch())`),
+  completedAt:      integer('completed_at', { mode: 'timestamp' }),
+}, (t) => ({
+  createdAtIdx: index('import_jobs_created_at_idx').on(t.createdAt),
+  statusIdx: index('import_jobs_status_idx').on(t.status),
+  submittedByIdx: index('import_jobs_submitted_by_idx').on(t.submittedByUserId),
+}))
+
+export const importAttempts = sqliteTable('import_attempts', {
+  id:              text('id').primaryKey(),
+  jobId:           text('job_id').notNull().references(() => importJobs.id),
+  attemptNumber:   integer('attempt_number').notNull().default(1),
+  provider:        text('provider').notNull(),
+  status:          text('status').notNull().default('running'),
+  requestPayload:  text('request_payload'),
+  responseSummary: text('response_summary'),
+  trace:           text('trace'),
+  errorCode:       text('error_code'),
+  errorMessage:    text('error_message'),
+  startedAt:       integer('started_at', { mode: 'timestamp' }).notNull()
+                     .default(sql`(unixepoch())`),
+  finishedAt:      integer('finished_at', { mode: 'timestamp' }),
+}, (t) => ({
+  jobIdx: index('import_attempts_job_idx').on(t.jobId),
+  jobAttemptUnique: uniqueIndex('import_attempts_job_attempt_unique').on(t.jobId, t.attemptNumber),
+}))
+
 export type Document = typeof documents.$inferSelect
 export type NewDocument = typeof documents.$inferInsert
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
 export type Agent = typeof agents.$inferSelect
 export type NewAgent = typeof agents.$inferInsert
+export type ImportJob = typeof importJobs.$inferSelect
+export type NewImportJob = typeof importJobs.$inferInsert
+export type ImportAttempt = typeof importAttempts.$inferSelect
+export type NewImportAttempt = typeof importAttempts.$inferInsert
+export type DocumentSource = typeof documentSources.$inferSelect
+export type NewDocumentSource = typeof documentSources.$inferInsert
 
 export const smartResults = sqliteTable('smart_results', {
   id:          text('id').primaryKey(),

@@ -6,7 +6,6 @@ import {
   BookOpenText,
   ChartNoAxesCombined,
   KeyRound,
-  UploadCloud,
   Users,
 } from 'lucide-react'
 import { AdminSignOutButton } from '@/components/admin/AdminSignOutButton'
@@ -31,11 +30,6 @@ const baseItems = [
     href: '/admin/documents',
     label: '文档',
     icon: BookOpenText,
-  },
-  {
-    href: '/admin/imports',
-    label: '导入中心',
-    icon: UploadCloud,
   },
 ] as const
 

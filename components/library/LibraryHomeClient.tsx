@@ -1,20 +1,16 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
 import Link from 'next/link'
-import { Search, SearchX } from 'lucide-react'
+import { Archive, ArrowUpRight, SearchX, Sparkles } from 'lucide-react'
 import { DocumentCard } from '@/components/DocumentCard'
 import { TagFilter } from '@/components/TagFilter'
-import { Input } from '@/components/ui/input'
 import { useLibraryTheme } from '@/components/library/LibraryThemeContext'
 import { type LibraryTheme } from '@/lib/library-theme'
 import { cn } from '@/lib/utils'
 
 interface SearchParams {
-  q?: string
   tag?: string
   page?: string
-  focus?: string
 }
 
 interface LibraryDocumentListItem {
@@ -43,30 +39,44 @@ interface Props {
 }
 
 const PRODUCT_COPY = {
-  eyebrow: 'Open NoteHub · 开放式知识文库',
-  title: '收藏、搜索、理解每一篇值得留下的文章',
+  eyebrow: 'Open NoteHub · 文库',
+  title: '把已经留下的内容整理成可浏览、可回看的知识文库',
   description:
-    'Open NoteHub 把保存下来的文章集中到一个地方，方便持续搜索、筛选与回看，并用 AI 继续翻译、总结和延展思考。',
+    '这里负责浏览、分类和持续回看。把外部网页收入文库请去入藏，围绕问题整理答案请去搜索。',
 }
 
-const PRODUCT_CAPABILITIES = ['搜索文库', 'AI 智读', '持续回看']
+const PRODUCT_CAPABILITIES = ['标签筛选', '最近入库', '持续回看']
+
+const WORKSPACE_LINKS = [
+  {
+    href: '/intake',
+    title: '入藏',
+    description: '把外部网页链接解析成预览，再确认收入文库。',
+    cta: '去入藏',
+    icon: Archive,
+  },
+  {
+    href: '/search',
+    title: '搜索',
+    description: '围绕问题做研究，先查文库，不够再补外部网页。',
+    cta: '去搜索',
+    icon: Sparkles,
+  },
+] as const
 
 const MODE_COPY: Record<
   LibraryTheme,
   {
     label: string
-    placeholder: string
     note: string
   }
 > = {
   focus: {
     label: '专注浏览',
-    placeholder: '搜索文章标题、主题或关键词…',
     note: '当前强调连续浏览、标签筛选与稳定回看。',
   },
   editorial: {
     label: '导读编排',
-    placeholder: '搜索专题、来源、关键词或想回看的文章…',
     note: '当前强调标题、摘要与快速挑选，适合先扫视再进入智读。',
   },
 }
@@ -75,16 +85,11 @@ function getPaginationHref(nextPage: number, searchParams: SearchParams) {
   const params = new URLSearchParams()
   params.set('page', String(nextPage))
 
-  if (searchParams.q) params.set('q', searchParams.q)
-  if (searchParams.tag) params.set('tag', searchParams.tag)
+  if (searchParams.tag) {
+    params.set('tag', searchParams.tag)
+  }
 
   return `?${params.toString()}`
-}
-
-function getSearchShellClass(theme: LibraryTheme) {
-  return theme === 'editorial'
-    ? 'border-[#d8c2a9] bg-[#fff7ed] shadow-[0_18px_36px_rgba(97,70,32,0.08)]'
-    : 'border-[#e2d6c7] bg-[#fffdf9] shadow-[0_14px_30px_rgba(100,77,49,0.08)]'
 }
 
 function getHeroClass(theme: LibraryTheme) {
@@ -107,24 +112,17 @@ function getResultsText(theme: LibraryTheme) {
 
 export function LibraryHomeClient({ data, tags, searchParams }: Props) {
   const { theme } = useLibraryTheme()
-  const searchInputRef = useRef<HTMLInputElement>(null)
   const modeCopy = MODE_COPY[theme]
-  const page = Math.max(1, parseInt(searchParams.page ?? '1'))
-
-  useEffect(() => {
-    if (searchParams.focus !== 'search') return
-
-    const input = searchInputRef.current
-    if (!input) return
-
-    input.focus()
-    input.select()
-    input.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  }, [searchParams.focus])
+  const page = Math.max(1, parseInt(searchParams.page ?? '1', 10))
 
   return (
     <div data-library-theme={theme} className="mx-auto max-w-3xl px-4 py-6 pb-24 sm:pb-8">
-      <section className={cn('overflow-hidden rounded-[30px] border px-5 py-6 sm:px-7 sm:py-7', getHeroClass(theme))}>
+      <section
+        className={cn(
+          'overflow-hidden rounded-[30px] border px-5 py-6 sm:px-7 sm:py-7',
+          getHeroClass(theme)
+        )}
+      >
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
           <div className="max-w-2xl">
             <p className="text-[11px] uppercase tracking-[0.24em] text-[#907a63] dark:text-zinc-500">
@@ -137,7 +135,7 @@ export function LibraryHomeClient({ data, tags, searchParams }: Props) {
               {PRODUCT_COPY.description}
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
-              {PRODUCT_CAPABILITIES.map(capability => (
+              {PRODUCT_CAPABILITIES.map((capability) => (
                 <span
                   key={capability}
                   className="rounded-full border border-[#dccfbe] bg-[#fffaf2] px-3 py-1 text-[12px] text-[#5f4d3a] dark:border-zinc-800 dark:bg-[#171310] dark:text-zinc-300"
@@ -162,19 +160,43 @@ export function LibraryHomeClient({ data, tags, searchParams }: Props) {
           </div>
         </div>
 
-        <form method="GET" className="mt-6">
-          {searchParams.tag && <input type="hidden" name="tag" value={searchParams.tag} />}
-          <div className={cn('relative overflow-hidden rounded-[22px] border', getSearchShellClass(theme))}>
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#8f7a62] dark:text-zinc-500" aria-hidden="true" />
-            <Input
-              ref={searchInputRef}
-              name="q"
-              defaultValue={searchParams.q}
-              placeholder={modeCopy.placeholder}
-              className="h-14 border-0 bg-transparent pl-12 pr-4 text-[15px] leading-none text-[#2a2018] placeholder:text-[#907a63] focus-visible:ring-0 focus-visible:ring-offset-0 dark:text-zinc-50 dark:placeholder:text-zinc-500"
-            />
-          </div>
-        </form>
+        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          {WORKSPACE_LINKS.map((link) => {
+            const Icon = link.icon
+
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={cn(
+                  'group rounded-[24px] border px-4 py-4 transition-all duration-300 hover:-translate-y-0.5',
+                  theme === 'editorial'
+                    ? 'border-[#d8c3ab] bg-[#fff8ef] hover:border-[#c8a988] hover:shadow-[0_20px_40px_rgba(90,63,25,0.12)]'
+                    : 'border-[#e2d6c7] bg-[#fffdf9] hover:border-[#d0c1af] hover:shadow-[0_18px_40px_rgba(100,77,49,0.1)]'
+                )}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-medium text-[#2a1f16] dark:text-zinc-50">
+                      <Icon className="h-4 w-4" aria-hidden="true" />
+                      <span>{link.title}</span>
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-[#675746] dark:text-zinc-400">
+                      {link.description}
+                    </p>
+                  </div>
+                  <ArrowUpRight
+                    className="h-4 w-4 shrink-0 text-[#8f7a62] transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5 dark:text-zinc-500"
+                    aria-hidden="true"
+                  />
+                </div>
+                <div className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-[#6d4c28] dark:text-[#ddb78a]">
+                  {link.cta}
+                </div>
+              </Link>
+            )
+          })}
+        </div>
 
         {tags.length > 0 && (
           <div className="mt-5">
@@ -185,8 +207,7 @@ export function LibraryHomeClient({ data, tags, searchParams }: Props) {
 
       <div className="mb-5 mt-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-[#6f5c49] dark:text-zinc-400">
-          共 {data.total} 篇文章
-          {searchParams.q && <span>，搜索“{searchParams.q}”</span>}
+          共 {data.total} 篇文章，按时间倒序浏览当前文库。
         </p>
         <p className="text-sm text-[#87715a] dark:text-zinc-500">
           当前为 {modeCopy.label}，{modeCopy.note}
@@ -196,14 +217,14 @@ export function LibraryHomeClient({ data, tags, searchParams }: Props) {
       {data.items.length === 0 ? (
         <div className="rounded-[28px] border border-dashed border-[#dacdbd] bg-[#fbf6ef] px-6 py-14 text-center dark:border-zinc-800 dark:bg-[#171310]">
           <SearchX className="mx-auto h-9 w-9 text-[#8d785f] dark:text-zinc-500" aria-hidden="true" />
-          <p className="mt-4 text-lg font-semibold text-[#2b2119] dark:text-zinc-50">没有找到匹配的文档</p>
+          <p className="mt-4 text-lg font-semibold text-[#2b2119] dark:text-zinc-50">当前筛选下还没有文档</p>
           <p className="mt-2 text-sm leading-6 text-[#7b6753] dark:text-zinc-400">
-            换个关键词，或先清掉标签筛选再试一次。
+            可以先清掉标签筛选，或者去入藏把新的网页内容收入文库。
           </p>
         </div>
       ) : (
         <div className={cn(theme === 'editorial' ? 'space-y-4' : 'space-y-5')}>
-          {data.items.map(doc => (
+          {data.items.map((doc) => (
             <DocumentCard
               key={doc.id}
               id={doc.id}

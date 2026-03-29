@@ -34,8 +34,7 @@ export default async function AdminOverviewPage() {
           Open NoteHub 后台
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-          这里先接通真实用户体系、角色边界和基础运营面板。导入中心与
-          `web-access` 会在下一阶段挂上同一条作业流水线。
+          这里负责用户、文档和 Agent 的后台运营。前台的文库、入藏和搜索已经是完整产品页，后台不再单独承担导入入口。
         </p>
       </div>
 
@@ -96,12 +95,10 @@ export default async function AdminOverviewPage() {
 
         <div className="rounded-3xl border border-[#dfcfbe] bg-[#fff6eb] p-5 dark:border-[#4e402f] dark:bg-[#1d1711]">
           <h2 className="text-lg font-semibold tracking-tight text-[#6d4c28] dark:text-[#ddb78a]">
-            下一阶段
+            当前后台职责
           </h2>
           <p className="mt-2 text-sm leading-6 text-[#6b5a48] dark:text-zinc-300">
-            现在后台已经具备 owner / editor 权限边界、文档管理、用户管理和
-            agent key 管理。下一步会把链接导入、provider 路由、失败重试和调试
-            trace 接到导入中心。
+            这里聚焦用户体系、角色边界、文档运营和 Agent / Key 管理。产品侧的入藏流程已经迁到前台一级页面，由统一的作业流水线支撑。
           </p>
         </div>
       </div>

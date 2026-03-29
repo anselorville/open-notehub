@@ -28,7 +28,11 @@ export function resolveDatabaseUrl(configuredUrl = process.env.DATABASE_URL) {
   }
 
   if (fs.existsSync(resolvedPath)) {
-    return databaseUrl
+    const stats = fs.statSync(resolvedPath)
+
+    if (stats.size > 0) {
+      return databaseUrl
+    }
   }
 
   const legacyPath = path.join(path.dirname(resolvedPath), LEGACY_DB_BASENAME)
