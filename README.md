@@ -45,7 +45,7 @@ curl -X POST https://your-domain.com/api/v1/documents \
 
 | Variable | Description |
 |----------|-------------|
-| `DATABASE_URL` | SQLite: `file:./open-notehub.db` or Turso: `libsql://...` |
+| `DATABASE_URL` | SQLite: `file:./data/open-notehub.db` or Turso: `libsql://...` |
 | `AUTH_PASSWORD` | Password for the reading interface |
 | `AUTH_SECRET` | JWT signing secret (32+ chars) |
 | `AGENT_API_KEY` | API key for agent document ingestion |
@@ -60,6 +60,8 @@ cp .env.example .env.local
 npm run db:migrate
 npm run dev
 ```
+
+Local SQLite data defaults to `data/open-notehub.db` so runtime files stay out of the repository root.
 
 ## Browser Validation
 

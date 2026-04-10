@@ -1,10 +1,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+const DEFAULT_DB_DIRECTORY = 'data'
 const DEFAULT_DB_BASENAME = 'open-notehub.db'
 const LEGACY_DB_BASENAME = 'learnhub.db'
+const DEFAULT_DB_RELATIVE_PATH = `./${DEFAULT_DB_DIRECTORY}/${DEFAULT_DB_BASENAME}`
 
-export const DEFAULT_DATABASE_URL = `file:./${DEFAULT_DB_BASENAME}`
+export const DEFAULT_DATABASE_URL = `file:${DEFAULT_DB_RELATIVE_PATH}`
 
 function resolveLocalFilePath(databaseUrl: string) {
   if (!databaseUrl.startsWith('file:')) {
@@ -19,26 +21,53 @@ function resolveLocalFilePath(databaseUrl: string) {
   return path.isAbsolute(rawPath) ? path.normalize(rawPath) : path.resolve(process.cwd(), rawPath)
 }
 
+function ensureParentDirectory(localFilePath: string) {
+  fs.mkdirSync(path.dirname(localFilePath), { recursive: true })
+}
+
+function hasUsableDatabaseFile(localFilePath: string) {
+  if (!fs.existsSync(localFilePath)) {
+    return false
+  }
+
+  const stats = fs.statSync(localFilePath)
+  return stats.isFile() && stats.size > 0
+}
+
+function isDefaultLocalDatabasePath(localFilePath: string) {
+  return path.normalize(localFilePath) === path.resolve(process.cwd(), DEFAULT_DB_RELATIVE_PATH)
+}
+
+function findLegacyDatabaseUrl() {
+  const candidates = [
+    `file:./${DEFAULT_DB_BASENAME}`,
+    `file:./${LEGACY_DB_BASENAME}`,
+  ]
+
+  for (const candidate of candidates) {
+    const candidatePath = resolveLocalFilePath(candidate)
+
+    if (candidatePath && hasUsableDatabaseFile(candidatePath)) {
+      return candidate
+    }
+  }
+
+  return null
+}
+
 export function resolveDatabaseUrl(configuredUrl = process.env.DATABASE_URL) {
   const databaseUrl = configuredUrl ?? DEFAULT_DATABASE_URL
   const resolvedPath = resolveLocalFilePath(databaseUrl)
 
-  if (!resolvedPath || path.basename(resolvedPath) !== DEFAULT_DB_BASENAME) {
+  if (!resolvedPath) {
     return databaseUrl
   }
 
-  if (fs.existsSync(resolvedPath)) {
-    const stats = fs.statSync(resolvedPath)
+  ensureParentDirectory(resolvedPath)
 
-    if (stats.size > 0) {
-      return databaseUrl
-    }
-  }
-
-  const legacyPath = path.join(path.dirname(resolvedPath), LEGACY_DB_BASENAME)
-  if (!fs.existsSync(legacyPath)) {
+  if (configuredUrl || !isDefaultLocalDatabasePath(resolvedPath) || hasUsableDatabaseFile(resolvedPath)) {
     return databaseUrl
   }
 
-  return databaseUrl.replace(DEFAULT_DB_BASENAME, LEGACY_DB_BASENAME)
+  return findLegacyDatabaseUrl() ?? databaseUrl
 }

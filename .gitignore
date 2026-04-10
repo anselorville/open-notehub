@@ -8,6 +8,7 @@
 
 # testing
 /coverage
+/test-results/
 
 # next.js
 /.next/
@@ -29,6 +30,11 @@ yarn-error.log*
 .env*.local
 .env
 
+# local data
+/data/*
+!/data/.gitkeep
+*.db
+
 # vercel
 .vercel
 
@@ -45,5 +51,6 @@ next-env.d.ts
 .opencode
 .codex
 .superpowers
+.codex-session-token.txt
 .*.log
 *.log.*

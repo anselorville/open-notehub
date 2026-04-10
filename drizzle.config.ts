@@ -5,6 +5,6 @@ export default {
   out: './lib/db/migrations',
   driver: 'libsql',
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? 'file:./open-notehub.db',
+    url: process.env.DATABASE_URL ?? 'file:./data/open-notehub.db',
   },
 } satisfies Config

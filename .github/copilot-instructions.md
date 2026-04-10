@@ -187,7 +187,7 @@ const results = await pLimit(tasks, concurrency) // order-preserving concurrent 
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DATABASE_URL` | Yes | `file:./learnhub.db` (local) or `libsql://...` (Turso) |
+| `DATABASE_URL` | Yes | `file:./data/open-notehub.db` (local) or `libsql://...` (Turso) |
 | `DATABASE_AUTH_TOKEN` | Turso only | Turso auth token |
 | `AUTH_PASSWORD` | Yes | Password for the reading UI |
 | `AUTH_SECRET` | Yes | JWT signing secret (32+ chars) |
